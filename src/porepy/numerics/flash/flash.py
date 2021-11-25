@@ -2,14 +2,45 @@ from typing import Callable, Dict, List, Optional, Tuple, Literal
 
 import numpy as np
 import scipy.sparse.linalg as spla
-from scipy import optimize
-from scipy.spatial import HalfspaceIntersection
 import scipy.sparse as sps
+from abc import ABC, abstractmethod
 
 import porepy as pp
 
 
-class TwoPhaseFlash:
+class KValueFlash(ABC):
+    """Flash calculations based on known K-values and overall composition."""
+
+    @abstractmethod
+    def equilibrium_saturations(
+        self, K: np.ndarray, z: np.ndarray, base_phase_order: List[int]
+    ) -> np.ndarray:
+        """Find the equilibrium saturations for a system with known K-values and
+        overall composition.
+        """
+        pass
+
+    @abstractmethod
+    def composition(
+        self,
+        K: np.ndarray,
+        z: np.ndarray,
+        saturation: np.ndarray,
+        base_phase: List[int],
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Get the distribution of components among phases given K-values, overall
+        compositions and saturations.
+        """
+        pass
+
+
+class EOSFlash(ABC):
+    """Flash calculations based on equation of state"""
+
+    pass
+
+
+class TwoPhaseFlash(KValueFlash):
     """Two-phase flash calculation based on solving the Rashford-Rice equation."""
 
     def __init__(self, params: Optional[Dict] = None) -> None:
