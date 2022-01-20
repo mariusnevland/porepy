@@ -201,3 +201,42 @@ def test_twophase_binary_mixture_mix_multiphase_and_singlephase():
 
     sat = two_phase.equilibrium_saturations(K[:, ::-1], z, base_phase=0)
     assert np.allclose(sat, known_sat[::-1])
+
+
+@pytest.mark.parametrize(
+    "Ky,Kz,z,sat_known,x_known,y_known,z_known",
+    [
+        (
+            [2.0, 1.3, 0.3],
+            [1.3, 2.2, 0.3],
+            [0.3, 0.4, 0.3],
+            [0.43243243243243223, -0.1548078690935835, 0.7223754366611512],
+            [0.2825112107623318, 0.21973094170403581, 0.4977578475336324],
+            [0.5650224215246636, 0.28565022421524655, 0.14932735426008972],
+            [0.3672645739910314, 0.48340807174887884, 0.14932735426008972],
+        )
+    ],
+)
+def test_threephase_ternary_mixture(Ky, Kz, z, sat_known, x_known, y_known, z_known):
+
+    num_components = len(Ky)
+    num_phases = 3
+    K = np.zeros((num_components, num_phases, 1))
+    K[:, 1] = np.array(Ky).reshape((-1, 1))
+    K[:, 2] = np.array(Kz).reshape((-1, 1))
+    K[:, 0] = 1
+
+    z = np.array(z).reshape((-1, 1))
+    sat_known = np.array(sat_known).reshape((-1, 1))
+    x_known = np.array(x_known).reshape((-1, 1))
+    y_known = np.array(x_known).reshape((-1, 1))
+    z_known = np.array(x_known).reshape((-1, 1))
+
+    base_phase = 0
+    other_phases = [1, 2]
+
+    #    domain_map = {0: pp.MultiphaseFlash.domain_vertexes([K[:, other_phases, 0]])}
+    flash = pp.MultiphaseFlash(params={})
+
+    sat = flash.equilibrium_saturations(K, z, base_phase_order=np.array([0, 1, 2]))
+    assert np.allclose(sat, sat_known)

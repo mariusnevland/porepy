@@ -13,7 +13,7 @@ class KValueFlash(ABC):
 
     @abstractmethod
     def equilibrium_saturations(
-        self, K: np.ndarray, z: np.ndarray, base_phase_order: List[int]
+        self, K: np.ndarray, z: np.ndarray, base_phase_order: List[int], **kwargs
     ) -> np.ndarray:
         """Find the equilibrium saturations for a system with known K-values and
         overall composition.
@@ -293,3 +293,233 @@ class TwoPhaseFlash(KValueFlash):
         lower_bound = lower.min(axis=0)
 
         return lower_bound, upper_bound
+
+
+class MultiphaseFlash(KValueFlash):
+    """Class for implementation of multphase flash computations.
+
+    For the moment, the number of phases is assumed to be 3, however, extension
+    should be relatively straightforward.
+    """
+
+    def __init__(self, params: Optional[Dict] = None):
+        self._params = params
+
+        self._num_phases = 3
+
+    def equilibrium_saturations(
+        self,
+        K: np.ndarray,
+        z: np.ndarray,
+        base_phase_order: np.ndarray,
+        active_cells: Optional[np.ndarray] = None,
+        domain_map: Optional[Dict[int, np.ndarray]] = None,
+    ) -> np.ndarray:
+        """Do a multistage negative flash for multiphase systems.
+
+        The formulation is based on Iranshar et al 2010.
+
+        Parameters:
+            K (np.ndarray): K-values for the composition.
+                Size: num_components x num_phases x num_cells.
+            z (np.ndarray): Overall composition. Size: num_components x num_cells.
+            derivative (bool): Formulate residual function in terms of AD variables.
+                Use this if the target non-linear solver requries derivatives.
+
+        Returns:
+            np.ndarray, size: num_phases x num_cells: Saturations.
+
+        """
+        # TODO: Need to somehow mark the base phase for defining K-values
+
+        num_comp, num_phases, num_cells = K.shape
+
+        if active_cells is None:
+            active_cells = np.ones(num_cells, dtype=bool)
+
+        if domain_map is None:
+            # Should loop here be over active cells?
+            domain_map = {
+                i: MultiphaseFlash.domain_vertexes([K[:, base_phase_order[1:], i]])[0]
+                for i in range(num_cells)
+            }
+
+        resids = []
+        for phase_ind in range(num_phases):
+            resids.append(self._resid_factory(K, z, phase_ind, active_cells))
+
+        s0, s1 = self._nested_bisection(resids, K, z, tol=1e-10)
+
+        s2 = 1 - (s0 + s1)
+
+        s_tmp = np.vstack((s0, s1, s2))
+
+        s = np.zeros_like(s_tmp)
+
+        # Need thresholding here
+        num_phases = np.sum(s_tmp > 0, axis=0)
+        s[:, num_phases == 3] = s_tmp[:, num_phases == 3]
+
+        two_phase = TwoPhaseFlash(self._params)
+
+        # Clear two-phase situations
+        for phase_pair in [(0, 1), (0, 2), (1, 2)]:
+            local_cells = np.logical_and(
+                num_phases == 2, np.all(s_tmp[phase_pair] > 0, axis=0)
+            )
+            if local_cells.size == 0:
+                continue
+
+            if (
+                np.where(base_phase_order == phase_pair[0]).ravel()
+                < np.where(base_phase_order == phase_pair[1]).ravel()
+            ):
+                local_base_phase, other_phase = phase_pair
+            else:
+                local_base_phase, other_phase = phase_pair[::-1]
+
+            K_loc = K[:, other_phase, local_cells] / K[:, local_base_phase, local_cells]
+
+            two_phase = TwoPhaseFlash()
+
+            s_other = two_phase.equilibrium_saturations(K_loc, z[:, local_cells])
+
+            s[other_phase, local_cells] = s_other
+            s[local_base_phase, local_cells] = 1 - s_other
+
+        for pi in range(3):
+            # Not sure what to do in single phase situations, but we probably need to do
+            # two-phase with the two other phases
+            local_cells = np.logical_and(num_phases == 1, s_tmp[pi] == 1)
+            if local_cells.size == 0:
+                continue
+
+            s[pi, local_cells] = 1
+
+            other_phase = np.setdiff1d(np.arange(3), pi)
+            for oi in other_phase:
+                K_loc = K[:, other_phase, local_cells] / K[:, pi, local_cells]
+
+                s_other = two_phase.equilibrium_saturations(K_loc, z[:, local_cells])
+
+                two_phase = s_other > 0
+                assert np.allclose(s[local_cells[two_phase]], 0)
+
+                s[oi, local_cells[two_phase]] = s_other[two_phase]
+                s[oi, local_cells[two_phase]] = 1 - s_other[two_phase]
+
+    def composition(self, K, z, saturations, base_phase_order):
+        pass
+
+    def _nested_bisection(self, resids: List[Callable], K: np.ndarray, z, tol: float):
+        # Nested bisection solver for a three-phase system (two independent saturations)
+        # Extension to more phases should be doable, but is not trivial
+
+        counter = 0
+        max_iter = 100
+
+        # Lower, upper, middle value of the target phase
+        lower, upper = self._domain
+        f1_lower = resids[1]([lower[:, i] for i in range(lower.shape[1])])
+        f1_upper = resids[1]([upper[:, i] for i in range(upper.shape[1])])
+        s1_low, s1_up = lower[:, 1], upper[:, 1]
+
+        while np.amax(f1_upper - f1_lower) > tol:
+
+            s1_mid = 0.5 * (s1_low + s1_up)
+
+            bounds_lower_0 = self._bounds(
+                fixed_phase=1, target_phase=0, sat=s1_low, K=K
+            )
+            bounds_mid_0 = self._bounds(fixed_phase=1, target_phase=0, sat=s1_mid, K=K)
+
+            f0_lower = self._resid_factory(
+                K, z, 0, np.arange(K.shape[2]), fixed_sat=s1_low
+            )
+            f0_mid = self._resid_factory(
+                K, z, 0, np.arange(K.shape[2]), fixed_sat=s1_mid
+            )
+
+            # Is there any reason not to use Newton here?
+            s0_lower = pp.nonlinear.scalar_bisection(
+                f0_lower, *bounds_lower_0, tol=1e-10
+            )
+            s0_mid = pp.nonlinear.scalar_bisection(f0_mid, *bounds_mid_0, tol=1e-10)
+
+            f1_mid = resids[1]([s0_lower, s1_low])
+            f1_mid = resids[1]([s0_mid, s1_mid])
+
+            mid_same = np.sign(f1_lower * f1_mid) > 0
+            mid_oposite = np.logical_not(mid_same)
+
+            s1_low[mid_same] = s1_mid[mid_same]
+            s1_up[mid_oposite] = s1_mid[mid_oposite]
+
+            counter += 1
+            if counter == max_iter:
+                raise ValueError("Maximum number of iterations reached")
+
+        return s0_mid, s1_mid
+
+    def _bounds(
+        self, fixed_phase: int, target_phase: int, sat: np.ndarray, K: np.ndarray
+    ):
+        # target_phase is the phase for which we need bounds
+        # fixed_phase is the phase with a fixed value. sat is associated with fixed_phase
+
+        K_target_less = np.ma.masked_less(K[:, target_phase], 1)
+        K_target_greater = np.ma.masked_greater(K[:, target_phase], 1)
+
+        K_fixed_less = np.ma.masked_array(K[:, fixed_phase], mask=K_target_less.mask)
+        K_fixed_greater = np.ma.masked_array(
+            K[:, fixed_phase], mask=K_target_greater.mask
+        )
+
+        # Not sure about axis argument here
+        lower = np.min(
+            (sat * (1 - K_fixed_greater) - 1) / (K_target_greater - 1), axis=2
+        )
+        upper = np.max((sat * (1 - K_fixed_less) - 1) / (K_target_less - 1), axis=2)
+
+        return lower, upper
+
+    def _resid_factory(
+        self,
+        K,
+        z,
+        pi: int,
+        cells: np.ndarray,
+        fixed_sat: Optional[List[np.ndarray]] = None,
+    ):
+        if fixed_sat is None:
+            fixed_sat = []
+
+        def func(sat):
+            f = 0
+            for comp in range(z.shape[0]):
+                # Assume that the fixed saturations have the highest indexes
+                for si, s in enumerate(sat + fixed_sat):
+                    m_i = 1 + s * (K[comp, si, cells] - 1)
+                f += z[comp, cells] * (1 - K[comp, pi, cells]) / m_i
+            return f
+
+        return func
+
+    @staticmethod
+    def domain_vertexes(K: List[np.ndarray]) -> List[np.ndarray]:
+        # Find the max and min permissible values of a specific phase, given K-values
+        num_cases = len(K)
+        num_comp, num_phases = K[0].shape
+
+        vertex_list: List[np.ndarray] = []
+
+        for i in range(num_cases):
+
+            # Use half space intersection method from scipy.
+            # This first requires an interior point, which we find by linear programming
+
+            A = 1 - K[i]
+            b = -np.ones(num_comp)
+            vertex_list.append(pp.half_space.vertexes_of_convex_domain(A, b).T)
+
+        return vertex_list

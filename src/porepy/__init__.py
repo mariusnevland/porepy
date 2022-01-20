@@ -167,6 +167,8 @@ from porepy.numerics.fracture_deformation.conforming_propagation import (
     ConformingFracturePropagation,
 )
 
+from porepy.numerics.flash.flash import TwoPhaseFlash, MultiphaseFlash
+
 # Related to models and solvers
 from porepy.numerics.nonlinear.nonlinear_solvers import NewtonSolver
 from porepy.numerics import nonlinear
