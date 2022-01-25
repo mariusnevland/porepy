@@ -8,20 +8,20 @@ import porepy as pp
 import numpy as np
 import scipy.sparse as sps
 import scipy.sparse.linalg as spla
-from . import AbstractModel
 
 # Shorthand typing
 interface_type = Tuple[pp.Grid, pp.Grid]
 grid_like_type = Union[pp.Grid, interface_type]
 
 
-class MultiphaseReactive(AbstractModel):
+class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
     def __init__(self, params: Dict) -> None:
         warnings.warn(
             """The multiphase reactive transport model is under development and
                       is prone to change without warning.
                       """
         )
+        super().__init__(params)
 
         # Experimental data structure, it is not clear how we will end up representing
         # the components. This should entre somewhere else eventually.
@@ -58,7 +58,7 @@ class MultiphaseReactive(AbstractModel):
         ## Parameter keywords
         self.flow_parameter_key: str = "flow"
         self.upwind_parameter_key: str = "upwind"
-        self.mass_key: str = "mass"
+        self.mass_parameter_key: str = "mass"
 
     def create_grid(self) -> None:
         """Create the grid bucket.
@@ -311,7 +311,7 @@ class MultiphaseReactive(AbstractModel):
         for g, d in self.gb:
             # Parameters for single-phase Darcy. This is copied from the incompressible
             # flow model.
-            bc = self._bc_type(g)
+            bc = self._bc_type_flow(g)
             bc_values = self._bc_values_flow(g)
 
             source_values = self._source(g)
@@ -329,7 +329,7 @@ class MultiphaseReactive(AbstractModel):
             pp.initialize_data(
                 g,
                 d,
-                self._flow_parameter_key,
+                self.flow_parameter_key,
                 {
                     "bc": bc,
                     "bc_values": bc_values,
@@ -350,7 +350,7 @@ class MultiphaseReactive(AbstractModel):
 
             # Mass weight parameter. Same for all phases
             mass_weight = self._porosity(g) * self._specific_volume(g)
-            d[pp.PARAMETERS][self.mass_key] = {"mass_weight": mass_weight}
+            d[pp.PARAMETERS][self.mass_parameter_key] = {"mass_weight": mass_weight}
 
             for j in range(self.num_fluid_phases):
                 bc = self._bc_type_transport(g, j)
@@ -452,7 +452,7 @@ class MultiphaseReactive(AbstractModel):
 
     #### Methods related to variables
 
-    def _set_variables(self) -> None:
+    def _assign_variables(self) -> None:
         """Define variables used to describe the system.
 
         These will include both primary and secondary variables, however, to be
@@ -483,20 +483,20 @@ class MultiphaseReactive(AbstractModel):
             primary_variables.update(
                 {
                     f"{self.phase_mole_fraction_variable}_{i}": {"cells": 1}
-                    for i in range(self.num_fluid_phases)
+                    for i in range(self.num_phases)
                 }
             )
             # Saturations
             primary_variables.update(
                 {
-                    f"{self.saturation}_{i}": {"cells": 1}
-                    for i in range(self.num_fluid_phases)
+                    f"{self.saturation_variable}_{i}": {"cells": 1}
+                    for i in range(self.num_phases)
                 }
             )
 
             # Component phase molar fractions
             # Note systematic naming convention: i is always component, j is phase.
-            for j in range(self.num_fluid_phases):
+            for j in range(self.num_phases):
                 for i in range(self.num_components):
                     primary_variables.update(
                         {f"{self.component_phase_variable}_{i}_{j}": {"cells": 1}}
@@ -512,9 +512,9 @@ class MultiphaseReactive(AbstractModel):
         self.equation_manager = pp.ad.EquationManager(self.gb, self.dof_manager)
 
         # The manager set, we can finally do the Ad formulation of variables
-        self._set_ad_variables()
+        self._assign_ad_variables()
 
-    def _set_ad_variables(self) -> None:
+    def _assign_ad_variables(self) -> None:
         """Make lists of AD-variables, indexed by component and/or phase number.
         The idea is to enable easy access to the Ad variables without having to
         construct these from the equation manager every time we need them.
@@ -523,35 +523,40 @@ class MultiphaseReactive(AbstractModel):
 
         grid_list = self._grid_list()
 
-        self._pressure_ad: pp.ad.MergedVariable = eqm.merge_variable(
+        self._pressure_ad: pp.ad.MergedVariable = eqm.merge_variables(
             [(g, self.pressure_variable) for g in grid_list]
         )
 
-        self._component_ad: List[pp.ad.Variable] = {}
+        self._component_ad: List[pp.ad.Variable] = []
 
         for i in range(self.num_components):
-            name = f"{self.composition_variable}_{i}"
-            var = eqm.merge_variable([(g, name) for g in grid_list])
-            self._componet_ad.append(var)
+            name = f"{self.component_variable}_{i}"
+            var = eqm.merge_variables([(g, name) for g in grid_list])
+            self._component_ad.append(var)
 
-        self._component_phase_ad: List[pp.ad.Variable] = {}
+        # Represent component phases as an numpy array instead of a list, so that we
+        # can access items by array[i, j], rather the more cumbersome array[i][j]
+        self._component_phase_ad: np.ndarray = np.empty(
+            (self.num_components, self.num_phases), dtype=object
+        )
         for i in range(self.num_components):
+            # Make inner list
             for j in range(self.num_phases):
                 name = f"{self.component_phase_variable}_{i}_{j}"
-                var = eqm.merge_variable([(g, name) for g in grid_list])
-                self._component_phase_ad.append(var)
+                var = eqm.merge_variables([(g, name) for g in grid_list])
+                self._component_phase_ad[i, j] = var
 
         self._saturation_ad = []
         self._phase_mole_fraction_ad = []
-        for j in range(self.num_phases):
+        for j in range(self.num_fluid_phases):
             # Define saturation variables for each phase
-            sat_var = eqm.merge_variable(
+            sat_var = eqm.merge_variables(
                 [(g, f"{self.saturation_variable}_{j}") for g in grid_list]
             )
             self._saturation_ad.append(sat_var)
 
             # Define Molar fraction variables, one for each phase
-            mf_var = eqm.merge_variable(
+            mf_var = eqm.merge_variables(
                 [(g, f"{self.phase_mole_fraction_variable}_{j}") for g in grid_list]
             )
             self._phase_mole_fraction_ad.append(mf_var)
@@ -595,7 +600,7 @@ class MultiphaseReactive(AbstractModel):
 
     #### Set governing equations, in AD form
 
-    def _set_equations(self) -> None:
+    def _assign_equations(self) -> None:
         """Method to set all equations."""
 
         self._set_transport_equations()
@@ -675,9 +680,9 @@ class MultiphaseReactive(AbstractModel):
 
             for i in range(self.num_components):
                 component_flux[i] += darcy_j * (
-                    upwind.upwind * (rho_j * self._component_phase_ad[i][j])
+                    upwind.upwind * (rho_j * self._component_phase_ad[i, j])
                 )
-        mass = pp.ad.MassAd(self.mass_parameter_key)
+        mass = pp.ad.MassMatrixAd(self.mass_parameter_key, grid_list)
 
         dt = 1
 
@@ -697,15 +702,15 @@ class MultiphaseReactive(AbstractModel):
             )
             # The advective flux is the sum of the internal (computed in flux_{i} above)
             # and the boundary condition
-            adv_flux = component_flux[i] + upwind.bound_transport * bc
+            # FIXME: We need to account for both Neumann and Dirichlet boundary conditions,
+            # and likely do some filtering.
+            adv_flux = component_flux[i] + upwind.bound_transport_neu * bc
 
+            z_i = self._component_ad[i]
             # accumulation term
             accum = (
                 mass.mass
-                * (
-                    locals()[f"z_{i}"] / rho_tot
-                    - locals()[f"z_{i}_prev_time"] / rho_tot_prev_time
-                )
+                * (z_i / rho_tot - z_i.previous_timestep() / rho_tot_prev_time)
                 / dt
             )
 
@@ -729,7 +734,7 @@ class MultiphaseReactive(AbstractModel):
         grid_list = self._grid_list()
         mpfa = pp.ad.MpfaAd(self.flow_parameter_key, grid_list)
 
-        bc = pp.ad.ParameterArray("bc_values", self.flow_parameter_key)
+        bc = pp.ad.ParameterArray(self.flow_parameter_key, "bc_values", grids=grid_list)
 
         darcy = mpfa.flux * self._pressure_ad + mpfa.bound_flux * bc
         return darcy
