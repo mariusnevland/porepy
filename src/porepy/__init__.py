@@ -35,7 +35,6 @@ try:
 except:
     # the assumption is that no configurations are given
     config = {}
-
 # ------------------------------------
 # Simplified namespaces. The rue of thumb is that classes and modules that a
 # user can be exposed to should have a shortcut here. Borderline cases will be
@@ -179,13 +178,15 @@ from porepy.models.run_models import (
     run_time_dependent_model,
 )
 
+# from porepy.numerics.ad.equation_manager import Equation, EquationManager
+from porepy.numerics import ad
+
 from porepy.models.contact_mechanics_model import ContactMechanics
 from porepy.models.contact_mechanics_biot_model import ContactMechanicsBiot
 from porepy.models.thm_model import THM
 from porepy.models.incompressible_flow_model import IncompressibleFlow
+from porepy.models.multiphase_reactive_transport import MultiphaseReactive
 
-# from porepy.numerics.ad.equation_manager import Equation, EquationManager
-from porepy.numerics import ad
 
 # Time stepping control
 from porepy.numerics.time_step_control import TimeSteppingControl
