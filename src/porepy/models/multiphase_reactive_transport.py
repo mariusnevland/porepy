@@ -3,6 +3,7 @@ multiphase transport. WIP.
 """
 from typing import Dict, List, Tuple, Union, Optional
 import warnings
+from dataclasses import dataclass
 
 import porepy as pp
 import numpy as np
@@ -14,6 +15,15 @@ interface_type = Tuple[pp.Grid, pp.Grid]
 grid_like_type = Union[pp.Grid, interface_type]
 
 
+@dataclass
+class AdVariables:
+    pressure: pp.ad.MergedVariable = None
+    component: List[pp.ad.MergedVariable] = None
+    component_phase: np.ndarray = None
+    saturation: List[pp.ad.MergedVariable] = None
+    phase_mole_fraction: pp.ad.MergedVariable = None
+
+
 class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
     def __init__(self, params: Dict) -> None:
         warnings.warn(
@@ -22,6 +32,8 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
                       """
         )
         super().__init__(params)
+
+        self._ad = AdVariables()
 
         # Experimental data structure, it is not clear how we will end up representing
         # the components. This should entre somewhere else eventually.
@@ -523,20 +535,20 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
         grid_list = self._grid_list()
 
-        self._pressure_ad: pp.ad.MergedVariable = eqm.merge_variables(
+        self._ad.pressure: pp.ad.MergedVariable = eqm.merge_variables(
             [(g, self.pressure_variable) for g in grid_list]
         )
 
-        self._component_ad: List[pp.ad.Variable] = []
+        self._ad.component: List[pp.ad.Variable] = []
 
         for i in range(self.num_components):
             name = f"{self.component_variable}_{i}"
             var = eqm.merge_variables([(g, name) for g in grid_list])
-            self._component_ad.append(var)
+            self._ad.component.append(var)
 
         # Represent component phases as an numpy array instead of a list, so that we
         # can access items by array[i, j], rather the more cumbersome array[i][j]
-        self._component_phase_ad: np.ndarray = np.empty(
+        self._ad.component_phase: np.ndarray = np.empty(
             (self.num_components, self.num_phases), dtype=object
         )
         for i in range(self.num_components):
@@ -544,22 +556,22 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             for j in range(self.num_phases):
                 name = f"{self.component_phase_variable}_{i}_{j}"
                 var = eqm.merge_variables([(g, name) for g in grid_list])
-                self._component_phase_ad[i, j] = var
+                self._ad.component_phase[i, j] = var
 
-        self._saturation_ad = []
-        self._phase_mole_fraction_ad = []
+        self._ad.saturation = []
+        self._ad.phase_mole_fraction = []
         for j in range(self.num_fluid_phases):
             # Define saturation variables for each phase
             sat_var = eqm.merge_variables(
                 [(g, f"{self.saturation_variable}_{j}") for g in grid_list]
             )
-            self._saturation_ad.append(sat_var)
+            self._ad.saturation.append(sat_var)
 
             # Define Molar fraction variables, one for each phase
             mf_var = eqm.merge_variables(
                 [(g, f"{self.phase_mole_fraction_variable}_{j}") for g in grid_list]
             )
-            self._phase_mole_fraction_ad.append(mf_var)
+            self._ad.phase_mole_fraction.append(mf_var)
 
     def _primary_variables(self) -> List[pp.ad.MergedVariable]:
         """Get a list of the primary variables of the system on AD form.
@@ -571,7 +583,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         # molar fractions.
         # Represent primary variables by their AD format, since this is what is needed
         # to interact with the EquationManager.
-        primary_variables = [self._pressure_ad] + self._component_ad[:-1]
+        primary_variables = [self._ad.pressure] + self._ad.component[:-1]
         return primary_variables
 
     def _secondary_variables(self) -> List[pp.ad.MergedVariable]:
@@ -583,10 +595,10 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         # The secondary variables are the final molar fraction, saturations, phase
         # mole fractions and component phases.
         secondary_variables = (
-            [self._component_ad[-1]]
-            + self._saturation_ad
-            + self._phase_mole_fraction_ad
-            + self._component_phase_ad
+            [self._ad.component[-1]]
+            + self._ad.saturation
+            + self._ad.phase_mole_fraction
+            + self._ad.component_phase
         )
         return secondary_variables
 
@@ -680,7 +692,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
             for i in range(self.num_components):
                 component_flux[i] += darcy_j * (
-                    upwind.upwind * (rho_j * self._component_phase_ad[i, j])
+                    upwind.upwind * (rho_j * self._ad.component_phase[i, j])
                 )
         mass = pp.ad.MassMatrixAd(self.mass_parameter_key, grid_list)
 
@@ -706,7 +718,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             # and likely do some filtering.
             adv_flux = component_flux[i] + upwind.bound_transport_neu * bc
 
-            z_i = self._component_ad[i]
+            z_i = self._ad.component[i]
             # accumulation term
             accum = (
                 mass.mass
@@ -736,7 +748,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
         bc = pp.ad.ParameterArray(self.flow_parameter_key, "bc_values", grids=grid_list)
 
-        darcy = mpfa.flux * self._pressure_ad + mpfa.bound_flux * bc
+        darcy = mpfa.flux * self._ad.pressure + mpfa.bound_flux * bc
         return darcy
 
     def _upstream(self, phase_ind: int) -> pp.ad.Operator:
@@ -775,12 +787,12 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         for i in range(self.num_components):
             phase_sum_i = sum(
                 [
-                    self._component_phase_ad[i, j] * self._phase_mole_fraction_ad[i, j]
+                    self._ad.component_phase[i, j] * self._ad.phase_mole_fraction[i, j]
                     for j in range(self.num_phases)
                 ]
             )
 
-            eq = self._component_ad[i] - phase_sum_i
+            eq = self._ad.component[i] - phase_sum_i
             eq_manager.equations.append(eq, name="Overall_comp_phase_comp")
 
     def _component_phase_sum_equations(self) -> None:
@@ -792,7 +804,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
         def _comp_sum(j: int) -> pp.ad.Operator:
             return sum(
-                [self._component_phase_ad[i, j] for i in range(self.num_components)]
+                [self._ad.component_phase[i, j] for i in range(self.num_components)]
             )
 
         sum_0 = _comp_sum(0)
@@ -807,7 +819,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         sum_j v_j = 1
 
         """
-        eq = sum([self._phase_mol_fraction_ad[j] for j in range(self.num_phases)])
+        eq = sum([self._ad.phase_mole_fraction[j] for j in range(self.num_phases)])
         self.equation_manager.equations.append(eq, "Phase_mole_fraction_sum")
 
     #### Constitutive laws
@@ -833,7 +845,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             pp.ad.Operator: Relative permeability of the given phase.
 
         """
-        sat = self._saturation_ad[j]
+        sat = self._ad.saturation[j]
         # Brooks-Corey function
         return pp.ad.Function(lambda x: x ** 2, "Rel. perm. liquid")(sat)
 
@@ -864,7 +876,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         if j is None:
             average = sum(
                 [
-                    self._density(j, prev_time) * self._saturation_ad[j]
+                    self._density(j, prev_time) * self._ad.saturation[j]
                     for j in range(self.num_fluid_phases)
                 ]
             )
@@ -878,7 +890,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         base_density = [1000, 800]
         compressibility = [1e-6, 1e-5]
 
-        var = self._pressure_ad.previous_timestep() if prev_time else self._pressure_ad
+        var = self._ad.pressure.previous_timestep() if prev_time else self._ad.pressure
         return pp.ad.Function(
             lambda p: base_density[j] * (1 + compressibility[j] * (p - base_pressure)),
             f"Density_phase_{j}",
