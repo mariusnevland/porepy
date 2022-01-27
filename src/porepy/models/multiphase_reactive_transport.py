@@ -108,13 +108,13 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         # Assign variables. This will also set up Dof and EqutaionManager, and
         # define Ad versions of the variables
         self._assign_variables()
+        # Assign initial conditions. If the problem is non-linear and the system should
+        # be initialized in equilibrium, iterations will be needed here.
+        self._initial_condition()
 
         # Set equations
         self._assign_equations()
 
-        # Assign initial conditions. If the problem is non-linear and the system should
-        # be initialized in equilibrium, iterations will be needed here.
-        self._initial_condition()
         self._discretize()
 
         self._export()
@@ -205,7 +205,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         inverter = lambda A: sps.csr_matrix(np.linalg.inv(A.A))
 
         primary_equations = [
-            self.equation_manager[name] for name in self._primary_equation_names
+            self._eq_manager[name] for name in self._primary_equation_names
         ]
         primary_variables = self._primary_variables()
 
@@ -238,7 +238,8 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
                 # with the data structures. Todo..
                 [
                     self.dof_manager.grid_and_variable_to_dofs(s._g, s._name)
-                    for s in variables
+                    for var in variables
+                    for s in var.sub_vars
                 ]
             )
         )
@@ -267,7 +268,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         # This method again can be tailored to target specific grids and variables,
         # but for simplicity, we create a prolongation matrix to the full set of equations
         # and use the resulting vector.
-        prolongation = self._prolongation_matrix()
+        prolongation = self._prolongation_matrix(self._secondary_variables())
 
         max_iters = 100
         i = 0
@@ -298,7 +299,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         Also feed a zero Darcy flux to the upwind discretization.
         """
         # This will set homogeneous conditions for all variables
-        super()._initial_conditions()
+        super()._initial_condition()
 
         for g, d in self.gb:
             d[pp.STATE][self.pressure_variable][:] = 1
@@ -362,15 +363,22 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
             # Mass weight parameter. Same for all phases
             mass_weight = self._porosity(g) * self._specific_volume(g)
-            d[pp.PARAMETERS][self.mass_parameter_key] = {"mass_weight": mass_weight}
+            pp.initialize_data(
+                g, d, self.mass_parameter_key, {"mass_weight": mass_weight}
+            )
 
             for j in range(self.num_fluid_phases):
                 bc = self._bc_type_transport(g, j)
                 bc_values = self._bc_values_transport(g, j)
-                d[pp.PARAMETERS][f"{self.upwind_parameter_key}_{j}"] = {
-                    "bc": bc,
-                    "bc_values": bc_values,
-                }
+                pp.initialize_data(
+                    g,
+                    d,
+                    f"{self.upwind_parameter_key}_{j}",
+                    {
+                        "bc": bc,
+                        "bc_values": bc_values,
+                    },
+                )
 
         # Assign diffusivity in the normal direction of the fractures.
         for e, data_edge in self.gb.edges():
@@ -491,18 +499,18 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
                 }
             )
 
-            # Phase mole fractions
+            # Phase mole fractions. Only in fluid phases
             primary_variables.update(
                 {
                     f"{self.phase_mole_fraction_variable}_{i}": {"cells": 1}
-                    for i in range(self.num_phases)
+                    for i in range(self.num_fluid_phases)
                 }
             )
-            # Saturations
+            # Saturations. Only in fluid phases
             primary_variables.update(
                 {
                     f"{self.saturation_variable}_{i}": {"cells": 1}
-                    for i in range(self.num_phases)
+                    for i in range(self.num_fluid_phases)
                 }
             )
 
@@ -521,7 +529,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
         # All variables defined, we can set up Dof and Equation managers
         self.dof_manager = pp.DofManager(self.gb)
-        self.equation_manager = pp.ad.EquationManager(self.gb, self.dof_manager)
+        self._eq_manager = pp.ad.EquationManager(self.gb, self.dof_manager)
 
         # The manager set, we can finally do the Ad formulation of variables
         self._assign_ad_variables()
@@ -531,7 +539,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         The idea is to enable easy access to the Ad variables without having to
         construct these from the equation manager every time we need them.
         """
-        eqm = self.equation_manager
+        eqm = self._eq_manager
 
         grid_list = self._grid_list()
 
@@ -598,7 +606,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             [self._ad.component[-1]]
             + self._ad.saturation
             + self._ad.phase_mole_fraction
-            + self._ad.component_phase
+            + self._ad.component_phase.ravel().tolist()
         )
         return secondary_variables
 
@@ -636,7 +644,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         # of writing. Question is, do we still eliminate (the only) one transport equation?
         # Maybe the answer is a trivial yes, but raise an error at this stage, just to
         # be sure.
-        assert len(self._component_ad) > 1
+        assert len(self._ad.component) > 1
 
         # FIXME: Mortar variables are needed here
         assert len(self._edge_list()) == 0
@@ -730,7 +738,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             component_mass_balance.append(accum + div * adv_flux)
 
         for i, eq in enumerate(component_mass_balance):
-            self.equation_manager.equations[f"Mass_balance_component{i}"] = eq
+            self._eq_manager.equations[f"Mass_balance_component{i}"] = eq
 
     def _single_phase_darcy(self) -> pp.ad.Operator:
         """Discretize single-phase Darcy's law using Mpfa.
@@ -782,25 +790,25 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         """
         Set equation z_i = \sum_j x_ij * v_j
         """
-        eq_manager = self.equation_manager
+        eq_manager = self._eq_manager
 
         for i in range(self.num_components):
             phase_sum_i = sum(
                 [
-                    self._ad.component_phase[i, j] * self._ad.phase_mole_fraction[i, j]
-                    for j in range(self.num_phases)
+                    self._ad.component_phase[i, j] * self._ad.phase_mole_fraction[j]
+                    for j in range(self.num_fluid_phases)
                 ]
             )
 
             eq = self._ad.component[i] - phase_sum_i
-            eq_manager.equations.append(eq, name="Overall_comp_phase_comp")
+            eq_manager.equations["Overall_comp_phase_comp"] = eq
 
     def _component_phase_sum_equations(self) -> None:
         """Force the component phases to sum to unity for all components.
 
         \sum_i x_i,0 = \sum_i x_ij, j=1,..
         """
-        eq_manager = self.equation_manager
+        eq_manager = self._eq_manager
 
         def _comp_sum(j: int) -> pp.ad.Operator:
             return sum(
@@ -811,7 +819,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
         for j in range(1, self.num_phases):
             sum_j = _comp_sum(j)
-            eq_manager.equations.append(sum_0 - sum_j, name=f"Comp_phase_sum_{j}")
+            eq_manager.equations[f"Comp_phase_sum_{j}"] = sum_0 - sum_j
 
     def _phase_mole_fraction_sum_equation(self) -> None:
         """Force mole fractions to sum to unity
@@ -819,8 +827,23 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         sum_j v_j = 1
 
         """
-        eq = sum([self._ad.phase_mole_fraction[j] for j in range(self.num_phases)])
-        self.equation_manager.equations.append(eq, "Phase_mole_fraction_sum")
+        eq = sum(
+            [self._ad.phase_mole_fraction[j] for j in range(self.num_fluid_phases)]
+        )
+        self._eq_manager.equations["Phase_mole_fraction_sum"] = eq
+
+    def _saturation_definition_equation(self) -> None:
+        """Relation between saturations and phase mole fractions"""
+        weighted_saturation = [
+            self._ad.saturation[j] * self._density(j)
+            for j in range(self.num_fluid_phases)
+        ]
+
+        for j in range(self.num_fluid_phases):
+            eq = self._ad.phase_mole_fraction[j] - weighted_saturation[j] / sum(
+                weighted_saturation
+            )
+            self._eq_manager[f"saturation_definition_{j}"] = eq
 
     #### Constitutive laws
 
