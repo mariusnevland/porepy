@@ -640,6 +640,8 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         self._component_phase_sum_equations()
         self._phase_mole_fraction_sum_equation()
 
+        self._saturation_definition_equation()
+
         # Now that all equations are set, we define sets of primary and secondary
         # equations, and similar with variables. These will be used to represent
         # the systems to be solved globally (transport equations) and locally
@@ -789,7 +791,10 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         For the moment, no standard 'simplest' model is implemented - this may change
         in the future.
         """
-        raise NotImplementedError("This must be implemented in subclasses")
+        if self.num_fluid_phases > 1:
+            raise NotImplementedError(
+                "Fluid phase equilibrium must be calculated in subproblem"
+            )
 
     #### Equations for bookkeeping (relation between various variables)
 
@@ -859,7 +864,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             eq = self._ad.phase_mole_fraction[j] - weighted_saturation[j] / sum(
                 weighted_saturation
             )
-            self._eq_manager[f"saturation_definition_{j}"] = eq
+            self._eq_manager.equations[f"saturation_definition_{j}"] = eq
 
     #### Constitutive laws
 
