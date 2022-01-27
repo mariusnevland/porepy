@@ -86,9 +86,13 @@ class AbstractModel:
 
     def _initial_condition(self) -> None:
         """Set initial guess for the variables."""
+        # All initial guesses are set to zero
         initial_values = np.zeros(self.dof_manager.num_dofs())
+
+        # Distribute using the dof manager
         self.dof_manager.distribute_variable(initial_values)
-        self.dof_manager.distribute_variable(initial_values, to_iterate=True)
+        # Use a copy of the array for the iterates.
+        self.dof_manager.distribute_variable(initial_values.copy(), to_iterate=True)
 
     def prepare_simulation(self) -> None:
         """Method called prior to the start of time stepping, or prior to entering the
