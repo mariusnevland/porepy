@@ -1093,18 +1093,22 @@ class Function(Operator):
 
     """
 
-    def __init__(self, func: Callable, name: str, local=False):
+    def __init__(self, func: Callable, name: Optional[str] = None):
         """Initialize a function.
 
         Parameters:
             func (Callable): Function which maps one or several Ad arrays to an
                 Ad array.
-            name (str): Name of the function.
+            name (str, optional): Name of the function. If not provided, the name
+                of func will be assigned.
 
         """
         self.func = func
-        self._name = name
-        self._operation = Operation.evaluate if not local else Operation.localeval
+        if name is None:
+            self._name = func.__name__
+        else:
+            self._name = name
+        self._operation = Operation.evaluate
         self._set_tree()
 
     def __mul__(self, other):
