@@ -19,7 +19,7 @@ grid_like_type = Union[pp.Grid, interface_type]
 class AdVariables:
     pressure: pp.ad.MergedVariable = None
     component: List[pp.ad.MergedVariable] = None
-    component_phase: np.ndarray = None
+    component_phase: Dict[Tuple[int, int], pp.ad.MergedVariable] = None
     saturation: List[pp.ad.MergedVariable] = None
     phase_mole_fraction: pp.ad.MergedVariable = None
 
@@ -49,6 +49,12 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         self.num_solid_phases = 0
 
         self.num_phases = self.num_fluid_phases + self.num_solid_phases
+
+        # Array keeping track of which components are present in which phases.
+        # Defaults to all True, override for specific cases.
+        self._component_present_in_phase = np.ones(
+            (self.num_components, self.num_phases), dtype=bool
+        )
 
         self.num_reactions = 0
 
@@ -518,9 +524,10 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             # Note systematic naming convention: i is always component, j is phase.
             for j in range(self.num_phases):
                 for i in range(self.num_components):
-                    primary_variables.update(
-                        {f"{self.component_phase_variable}_{i}_{j}": {"cells": 1}}
-                    )
+                    if self._component_present_in_phase[i, j]:
+                        primary_variables.update(
+                            {f"{self.component_phase_variable}_{i}_{j}": {"cells": 1}}
+                        )
             # The wording is a bit confusing here, these will not be taken as
             d[pp.PRIMARY_VARIABLES] = primary_variables
 
@@ -556,15 +563,14 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
         # Represent component phases as an numpy array instead of a list, so that we
         # can access items by array[i, j], rather the more cumbersome array[i][j]
-        self._ad.component_phase: np.ndarray = np.empty(
-            (self.num_components, self.num_phases), dtype=object
-        )
+        self._ad.component_phase = {}
         for i in range(self.num_components):
             # Make inner list
             for j in range(self.num_phases):
-                name = f"{self.component_phase_variable}_{i}_{j}"
-                var = eqm.merge_variables([(g, name) for g in grid_list])
-                self._ad.component_phase[i, j] = var
+                if self._component_present_in_phase[i, j]:
+                    name = f"{self.component_phase_variable}_{i}_{j}"
+                    var = eqm.merge_variables([(g, name) for g in grid_list])
+                    self._ad.component_phase[(i, j)] = var
 
         self._ad.saturation = []
         self._ad.phase_mole_fraction = []
@@ -606,7 +612,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             [self._ad.component[-1]]
             + self._ad.saturation
             + self._ad.phase_mole_fraction
-            + self._ad.component_phase.ravel().tolist()
+            + list(self._ad.component_phase.values())
         )
         return secondary_variables
 
@@ -699,9 +705,10 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             darcy_j = (upwind.upwind * rp) * darcy
 
             for i in range(self.num_components):
-                component_flux[i] += darcy_j * (
-                    upwind.upwind * (rho_j * self._ad.component_phase[i, j])
-                )
+                if self._component_present_in_phase[i, j]:
+                    component_flux[i] += darcy_j * (
+                        upwind.upwind * (rho_j * self._ad.component_phase[i, j])
+                    )
         mass = pp.ad.MassMatrixAd(self.mass_parameter_key, grid_list)
 
         dt = 1
@@ -793,15 +800,20 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         eq_manager = self._eq_manager
 
         for i in range(self.num_components):
+            # Do not enforce this for components only present in the solid phase
+            if not np.any(self._component_present_in_phase[i, : self.num_fluid_phases]):
+                continue
+
             phase_sum_i = sum(
                 [
                     self._ad.component_phase[i, j] * self._ad.phase_mole_fraction[j]
                     for j in range(self.num_fluid_phases)
+                    if self._component_present_in_phase[i, j]
                 ]
             )
 
             eq = self._ad.component[i] - phase_sum_i
-            eq_manager.equations["Overall_comp_phase_comp"] = eq
+            eq_manager.equations[f"Overall_comp_phase_comp_{i}"] = eq
 
     def _component_phase_sum_equations(self) -> None:
         """Force the component phases to sum to unity for all components.
@@ -812,12 +824,16 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
         def _comp_sum(j: int) -> pp.ad.Operator:
             return sum(
-                [self._ad.component_phase[i, j] for i in range(self.num_components)]
+                [
+                    self._ad.component_phase[i, j]
+                    for i in range(self.num_components)
+                    if self._component_present_in_phase[i, j]
+                ]
             )
 
         sum_0 = _comp_sum(0)
 
-        for j in range(1, self.num_phases):
+        for j in range(1, self.num_fluid_phases):
             sum_j = _comp_sum(j)
             eq_manager.equations[f"Comp_phase_sum_{j}"] = sum_0 - sum_j
 
