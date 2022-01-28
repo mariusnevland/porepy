@@ -1,11 +1,7 @@
 import numpy as np
 import scipy.sparse as sps
 
-import porepy as pp
-
 __all__ = ["initAdArrays", "Ad_array"]
-
-module_sections = ["assembly", "numerics"]
 
 
 def initAdArrays(variables):
@@ -15,7 +11,6 @@ def initAdArrays(variables):
         except AttributeError:
             num_val = 1
         return Ad_array(variables, sps.diags(np.ones(num_val)).tocsc())
-
     num_val = [v.size for v in variables]
     ad_arrays = []
     for i, val in enumerate(variables):
@@ -27,7 +22,6 @@ def initAdArrays(variables):
         # initiate Ad_array
         jac = sps.bmat([jac])
         ad_arrays.append(Ad_array(val, jac))
-
     return ad_arrays
 
 
@@ -111,7 +105,6 @@ class Ad_array:
             raise ValueError(
                 "Somthing went horrible wrong, should" "have called __pow__"
             )
-
         val = other ** self.val
         jac = self.diagvec_mul_jac(other ** self.val * np.log(other))
         return Ad_array(val, jac)
@@ -145,7 +138,6 @@ class Ad_array:
             A = sps.diags(a)
         except TypeError:
             A = a
-
         if isinstance(self.jac, np.ndarray):
             return np.array([A * J for J in self.jac])
         else:
