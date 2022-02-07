@@ -10,6 +10,8 @@ import numpy as np
 import scipy.sparse as sps
 import scipy.sparse.linalg as spla
 
+from tests import unit
+
 # Shorthand typing
 interface_type = Tuple[pp.Grid, pp.Grid]
 grid_like_type = Union[pp.Grid, interface_type]
@@ -850,8 +852,9 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         """
         eq = sum(
             [self._ad.phase_mole_fraction[j] for j in range(self.num_fluid_phases)]
-        )
-        self._eq_manager.equations["Phase_mole_fraction_sum"] = eq
+        )  # TODO subtract unity
+        unity = np.ones(self.gb.num_cells())
+        self._eq_manager.equations["Phase_mole_fraction_sum"] = eq - unity
 
     def _saturation_definition_equation(self) -> None:
         """Relation between saturations and phase mole fractions"""
