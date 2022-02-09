@@ -852,8 +852,8 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         """
         eq = sum(
             [self._ad.phase_mole_fraction[j] for j in range(self.num_fluid_phases)]
-        )  # TODO subtract unity
-        unity = np.ones(self.gb.num_cells())
+        )
+        unity = pp.ad.Array(np.ones(self.gb.num_cells()))
         self._eq_manager.equations["Phase_mole_fraction_sum"] = eq - unity
 
     def _saturation_definition_equation(self) -> None:
