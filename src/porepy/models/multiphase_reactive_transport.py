@@ -284,6 +284,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             A, b = sec_man.assemble()
             if np.linalg.norm(b) < 1e-10:
                 break
+            breakpoint()
             x = spla.spsolve(A, b)
             full_x = prolongation * x
             self.dof_manager.distribute_variable(full_x, additive=True, to_iterate=True)
@@ -500,18 +501,20 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             primary_variables = {self.pressure_variable: {"cells": 1}}
 
             # Total molar fraction of each component
-            primary_variables.update(
-                {
-                    f"{self.component_variable}_{i}": {"cells": 1}
-                    for i in range(self.num_components)
-                }
-            )
+            for i in range(self.num_components):
+                if not any(
+                    self._component_present_in_phase[i, : self.num_fluid_phases]
+                ):
+                    continue
+                primary_variables.update(
+                    {f"{self.component_variable}_{i}": {"cells": 1}}
+                )
 
             # Phase mole fractions. Only in fluid phases
             primary_variables.update(
                 {
-                    f"{self.phase_mole_fraction_variable}_{i}": {"cells": 1}
-                    for i in range(self.num_fluid_phases)
+                    f"{self.phase_mole_fraction_variable}_{j}": {"cells": 1}
+                    for j in range(self.num_fluid_phases)
                 }
             )
             # Saturations. Only in fluid phases
@@ -559,6 +562,8 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         self._ad.component: List[pp.ad.Variable] = []
 
         for i in range(self.num_components):
+            if not any(self._component_present_in_phase[i, : self.num_fluid_phases]):
+                continue
             name = f"{self.component_variable}_{i}"
             var = eqm.merge_variables([(g, name) for g in grid_list])
             self._ad.component.append(var)
@@ -625,6 +630,25 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
     def _edge_list(self) -> List[interface_type]:
         return [e for e, _ in self.gb.edges()]
+
+    #### Enquiries on which components are in which phases etc.
+    def _component_in_phase(self, i: int, j: int) -> bool:
+        """Check if component i can be present in phase j.
+
+        The default implementation always returns True, override if a component can
+        only be present in certain phases.
+        """
+        return True
+
+    def _fluid_phase_indices(self) -> np.ndarray:
+        """"Get the index of all fluid phases"""
+        # Assume the fluid phases are numbered first.
+        return np.arange(self.num_fluid_phases)
+
+    def _solid_phase_indices(self) -> np.ndarray:
+        """"Get the index of all solid phases"""
+        # Assume the solid phases are numbered after the fluid phases.
+        return np.arange(self.num_fluid_phases, self.num_phases)
 
     #### Set governing equations, in AD form
 
@@ -727,6 +751,8 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         g = self.gb.grids_of_dimension(self.gb.dim_max())[0]
 
         for i in range(self.num_components):
+            if not any(self._component_present_in_phase[i, : self.num_fluid_phases]):
+                continue
             # Boundary conditions
             bc = pp.ad.ParameterArray(  # Not sure about this part - should there also be a phase-wise boundary condition?
                 param_keyword=upwind.keyword, array_keyword="bc_values", grids=[g]
@@ -821,6 +847,15 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
             eq = self._ad.component[i] - phase_sum_i
             eq_manager.equations[f"Overall_comp_phase_comp_{i}"] = eq
+
+        eq = 0
+        for i in range(self.num_components):
+            # Do not enforce this for components only present in the solid phase
+            if not np.any(self._component_present_in_phase[i, : self.num_fluid_phases]):
+                continue
+            eq += self._ad.component[i]
+
+        eq_manager.equations["Sum_of_all_overall_components"] = eq
 
     def _component_phase_sum_equations(self) -> None:
         """Force the component phases to sum to unity for all components.
