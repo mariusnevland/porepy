@@ -76,7 +76,7 @@ class AbstractModel:
         phys_dims = [1, 1]
         n_cells = [1, 1]
         self.box: Dict = pp.geometry.bounding_box.from_points(
-            np.array([[0, 0], phys_dims])
+            np.array([[0, 0], phys_dims]).T
         )
         g: pp.Grid = pp.CartGrid(n_cells, phys_dims)
         g.compute_geometry()
@@ -254,7 +254,7 @@ class AbstractModel:
         else:
             raise ValueError("Have not conisdered this type of unknown vector")
 
-        norm = np.sqrt(np.reshape(val ** 2, (nd, nc), order="F") * g.cell_volumes)
+        norm = np.sqrt(np.reshape(val**2, (nd, nc), order="F") * g.cell_volumes)
 
         return np.sum(norm)
 

@@ -410,7 +410,6 @@ class Operator:
 
                 else:
                     msg = error_message("multiplying")
-                breakpoint()
                 raise ValueError(msg) from exc
 
         elif tree.op == Operation.evaluate:
@@ -536,7 +535,7 @@ class Operator:
         return Operator(tree=Tree(Operation.add, children), name="Addition operator")
 
     def __sub__(self, other):
-        children = [self, other]
+        children = self._parse_other(other)
         return Operator(tree=Tree(Operation.sub, children), name="Subtraction operator")
 
     def __rmul__(self, other):
@@ -849,7 +848,7 @@ class Scalar(Operator):
 
 
 class Variable(Operator):
-    """Ad representation of a variable which on a single Grid or MortarGrid.
+    """Ad representation of a variable defined on a single Grid or MortarGrid.
 
     For combinations of variables on different grids, see MergedVariable.
 
@@ -1172,7 +1171,7 @@ class Function(Operator):
 
 
 class ApplicableOperator(Function):
-    """Ad representation of operator providing metod 'apply'.
+    """Ad representation of operator providing method 'apply'.
     This class is meant as base class.
     """
 

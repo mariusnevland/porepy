@@ -161,7 +161,10 @@ from porepy.numerics.interface_laws.contact_mechanics_interface_laws import (
     MatrixScalarToForceBalance,
     FractureScalarToForceBalance,
 )
-from porepy.numerics.fracture_deformation.contact_conditions import ColoumbContact
+from porepy.numerics.fracture_deformation.contact_conditions import (
+    ColoumbContact,
+    ContactTraction,
+)
 from porepy.numerics.fracture_deformation import contact_conditions, propagate_fracture
 from porepy.numerics.fracture_deformation.conforming_propagation import (
     ConformingFracturePropagation,
@@ -187,6 +190,7 @@ from porepy.models.contact_mechanics_biot_model import ContactMechanicsBiot
 from porepy.models.thm_model import THM
 from porepy.models.incompressible_flow_model import IncompressibleFlow
 from porepy.models.multiphase_reactive_transport import MultiphaseReactive
+from porepy.models.slightly_compressible_flow_model import SlightlyCompressibleFlow
 
 
 # Time stepping control
@@ -196,9 +200,6 @@ from porepy.numerics.time_step_control import TimeSteppingControl
 from porepy.viz.exporter import Exporter
 from porepy.viz.plot_grid import plot_grid, save_img
 from porepy.viz.fracture_visualization import plot_fractures, plot_wells
-
-# io
-from porepy.grids import grid_reader, grid_writer
 
 # Modules
 from porepy.fracs import utils as frac_utils

@@ -18,6 +18,7 @@ __all__ = [
     "Trace",
     "SubdomainProjections",
     "ParameterArray",
+    "ParameterMatrix",
 ]
 
 Edge = Tuple[pp.Grid, pp.Grid]
@@ -26,11 +27,11 @@ Edge = Tuple[pp.Grid, pp.Grid]
 class SubdomainProjections(Operator):
     """Wrapper class for generating projection to and from subdomains.
 
-    One use case in when variables are defined on only some of subdomains.
+    One use case in when variables are defined on only some of the subdomains.
 
-    The class should be used through the methods {cell, face}_{projection,restriction}.
+    The class should be used through the methods {cell, face}_{projection, restriction}.
 
-    See also MortarProjections for projcetions to and from mortar grids.
+    See also MortarProjections for projections to and from mortar grids.
 
     """
 
@@ -41,17 +42,13 @@ class SubdomainProjections(Operator):
     ) -> None:
         """Construct sudomain restrictions and prolongations for a set of subdomains.
 
-        The projections will be ordered according to the ordering in grids, or the order
-        of the GridBucket iteration over grids. Iit is critical that the same ordering
-        is used by other operators.
+        The projections will be ordered according to the ordering in grids. It is critical
+        that the same ordering is used by other operators.
 
         Parameters:
             grids (List of pp.Grid): List of grids. The order of the grids in the list
-                sets the ordering of the subdomain projections.
-            gb (pp.GridBucket): Used if grid list is not provided. The order of the
-                grids is set according to iteration over the GridBucket nodes.
-            is_scalar (bool, optional): If true, projections are constructed for scalar
-                quantities.
+                will establish the ordering of the subdomain projections.
+            nd (int, optional): Dimension of the quantities to be projected.
 
         """
         self._name = "SubdomainProjection"
@@ -77,7 +74,7 @@ class SubdomainProjections(Operator):
                 the projection should apply.
 
         Returns:
-            pp.ad.Matrix: Matrix operator (in the Ad sense) that represent the
+            pp.ad.Matrix: Matrix operator (in the Ad sense) that represents the
                 projection.
 
         """
@@ -87,12 +84,13 @@ class SubdomainProjections(Operator):
             if len(grids) > 0:
                 # A key error will be raised if a grid in g is not known to
                 # self._cell_projection
+                # IMPLEMENTATION NOTE: Use csr format, since the number of rows can
+                # be much less than the number of columns.
                 mat = sps.bmat([[self._cell_projection[g].T] for g in grids]).tocsr()
             else:
                 # If the grid list is empty, we project from the full set of cells to
                 # nothing.
                 mat = sps.csr_matrix((0, self._tot_num_cells * self._nd))
-
             return pp.ad.Matrix(
                 mat,
                 name="CellRestriction",
@@ -118,12 +116,13 @@ class SubdomainProjections(Operator):
             if len(grids) > 0:
                 # A key error will be raised if a grid in g is not known to
                 # self._cell_projection
-                mat = sps.bmat([[self._cell_projection[g] for g in grids]]).tocsr()
+                # IMPLEMENTATION NOTE: Use csc format, since the number of columns can
+                # be much less than the number of rows.
+                mat = sps.bmat([[self._cell_projection[g] for g in grids]]).tocsc()
             else:
                 # If the grid list is empty, we project from nothing to the full set of
                 # cells
-                mat = sps.csr_matrix((self._tot_num_cells * self._nd, 0))
-
+                mat = sps.csc_matrix((self._tot_num_cells * self._nd, 0))
             return pp.ad.Matrix(
                 mat,
                 name="CellProlongation",
@@ -151,6 +150,8 @@ class SubdomainProjections(Operator):
             if len(grids) > 0:
                 # A key error will be raised if a grid in grids is not known to
                 # self._face_projection
+                # IMPLEMENTATION NOTE: Use csr format, since the number of rows can
+                # be much less than the number of columns.
                 mat = sps.bmat([[self._face_projection[g].T] for g in grids]).tocsr()
             else:
                 # If the grid list is empty, we project from the full set of faces to
@@ -181,11 +182,13 @@ class SubdomainProjections(Operator):
             if len(grids) > 0:
                 # A key error will be raised if a grid in grids is not known to
                 # self._face_projection
-                mat = sps.bmat([[self._face_projection[g] for g in grids]]).tocsr()
+                # IMPLEMENTATION NOTE: Use csc format, since the number of columns can
+                # be much less than the number of rows.
+                mat = sps.bmat([[self._face_projection[g] for g in grids]]).tocsc()
             else:
                 # If the grid list is empty, we project from nothing to the full set of
                 # faces
-                mat = sps.csr_matrix((self._tot_num_faces * self._nd, 0))
+                mat = sps.csc_matrix((self._tot_num_faces * self._nd, 0))
             return pp.ad.Matrix(
                 mat,
                 name="FaceProlongation",
@@ -249,14 +252,13 @@ class MortarProjections(Operator):
         is used by other operators.
 
         Parameters:
-            gb (pp.GridBucket): Mixed-dimensional grid.
-            grids (List of pp.Grid, optional): List of grids for which the projections
-                should apply. If not provided, all grids in gb will be used. The order
-                 of the grids in the list sets the ordering of the subdomain projections.
-
-            edges (List of edges, optional): List of edges for which the projections
-                should apply. If not provided, all grids in gb will be used. The order
-                 of the grids in the list sets the ordering of the subdomain projections.
+            gb (pp.GridBucket): Mixed-dimensional grid bucket.
+            grids (List of pp.Grid): List of grids for which the projections
+                should apply. The order of the grids in the list establishes the ordering of
+                the subdomain projections.
+            edges (List of edges): List of edges for which the projections
+                should apply. The order of the grids in the list establishes the ordering of
+                the subdomain projections.
             nd (int, optional): Dimension of the quantities to be projected.
 
         """
@@ -264,8 +266,7 @@ class MortarProjections(Operator):
         self._num_edges: int = len(edges)
         self._nd: int = nd
 
-        ## Initialize projections
-
+        # Initialize projections
         cell_projection, face_projection = _subgrid_projections(grids, self._nd)
 
         # IMPLEMENTATION NOTE:
@@ -292,7 +293,8 @@ class MortarProjections(Operator):
         if len(edges) > 0:
             for e in edges:
                 g_primary, g_secondary = e
-                mg: pp.MortarGrid = gb.edge_props(e, "mortar_grid")
+                mg = gb.edge_props(e, "mortar_grid")
+                assert isinstance(mg, pp.MortarGrid)  # Appease mypy
                 if (g_primary.dim != mg.dim + mg.codim) or g_secondary.dim != mg.dim:
                     # This will correspond to DD of sorts; we could handle this
                     # by using cell_projections for g_primary and/or
@@ -304,34 +306,65 @@ class MortarProjections(Operator):
                     if mg.codim < 2
                     else cell_projection[g_primary]
                 )
+                # Create all projection matrices for this MortarGrid and append them to
+                # the list. The use of optimized storage is of importance here, since
+                # for small subdomain grids in problems with many cells in total, the
+                # projection matrices may have many more rows than columns, or oposite.
+
                 # Projections to primary
                 mortar_to_primary_int.append(
-                    primary_projection * mg.mortar_to_primary_int(nd)
+                    pp.matrix_operations.optimized_compressed_storage(
+                        primary_projection * mg.mortar_to_primary_int(nd)
+                    )
                 )
                 mortar_to_primary_avg.append(
-                    primary_projection * mg.mortar_to_primary_avg(nd)
+                    pp.matrix_operations.optimized_compressed_storage(
+                        primary_projection * mg.mortar_to_primary_avg(nd)
+                    )
                 )
 
                 # Projections from primary
                 primary_to_mortar_int.append(
-                    mg.primary_to_mortar_int(nd) * primary_projection.T
+                    pp.matrix_operations.optimized_compressed_storage(
+                        mg.primary_to_mortar_int(nd) * primary_projection.T
+                    )
                 )
                 primary_to_mortar_avg.append(
-                    mg.primary_to_mortar_avg(nd) * primary_projection.T
+                    pp.matrix_operations.optimized_compressed_storage(
+                        mg.primary_to_mortar_avg(nd) * primary_projection.T
+                    )
                 )
 
+                # Projections to secondary
                 mortar_to_secondary_int.append(
-                    cell_projection[g_secondary] * mg.mortar_to_secondary_int(nd)
+                    pp.matrix_operations.optimized_compressed_storage(
+                        cell_projection[g_secondary] * mg.mortar_to_secondary_int(nd)
+                    )
                 )
                 mortar_to_secondary_avg.append(
-                    cell_projection[g_secondary] * mg.mortar_to_secondary_avg(nd)
+                    pp.matrix_operations.optimized_compressed_storage(
+                        cell_projection[g_secondary] * mg.mortar_to_secondary_avg(nd)
+                    )
                 )
 
+                # Projections from secondary.
+                # IMPLEMENTATION NOTE: For some reason, forcing csr format here
+                # decreased the runtime with a factor of 5, while this was not important
+                # while creating the other projection matrices. Experimentation showed no
+                # similar pattern when flipping between csc and csr formats, so it probably
+                # just has to be in this way, or this was case-dependent behavior (the
+                # relevant test case was the field case in the 3d flow benchmark).
                 secondary_to_mortar_int.append(
-                    mg.secondary_to_mortar_int(nd) * cell_projection[g_secondary].T
+                    pp.matrix_operations.optimized_compressed_storage(
+                        mg.secondary_to_mortar_int(nd).tocsr()
+                        * cell_projection[g_secondary].T
+                    )
                 )
                 secondary_to_mortar_avg.append(
-                    mg.secondary_to_mortar_avg(nd) * cell_projection[g_secondary].T
+                    pp.matrix_operations.optimized_compressed_storage(
+                        mg.secondary_to_mortar_avg(nd).tocsr()
+                        * cell_projection[g_secondary].T
+                    )
                 )
         else:
             # FIXME: The assumption here is that a GridBucket with a single grid
@@ -346,9 +379,9 @@ class MortarProjections(Operator):
             num_faces_higher_dimension = sum([g.num_faces for g in grids]) * nd
 
             # Projections to and from the grid
-            to_face = sps.csr_matrix((num_faces_higher_dimension, 0))
+            to_face = sps.csc_matrix((num_faces_higher_dimension, 0))
             from_face = sps.csr_matrix((0, num_faces_higher_dimension))
-            to_cells = sps.csr_matrix((num_cells_lower_dimension, 0))
+            to_cells = sps.csc_matrix((num_cells_lower_dimension, 0))
             from_cells = sps.csr_matrix((0, num_cells_lower_dimension))
 
             # Projections to primary
@@ -369,7 +402,11 @@ class MortarProjections(Operator):
         # The projections are wrapped by a pp.ad.Matrix to be compatible with the
         # requirements for processing of Ad operators.
         def bmat(matrices, name):
-            return Matrix(sps.bmat(matrices, format="csr"), name=name)
+            # Create block matrix, convert it to optimized storage format
+            block_matrix = pp.matrix_operations.optimized_compressed_storage(
+                sps.bmat(matrices)
+            )
+            return Matrix(block_matrix, name=name)
 
         self.mortar_to_primary_int = bmat(
             [mortar_to_primary_int], name="MortarToPrimaryInt"
@@ -402,6 +439,7 @@ class MortarProjections(Operator):
         mats = []
         for e in edges:
             mg = gb.edge_props(e, "mortar_grid")
+            assert isinstance(mg, pp.MortarGrid)  # Appease mypy
             mats.append(mg.sign_of_mortar_sides(nd))
         if len(edges) == 0:
             self.sign_of_mortar_sides = Matrix(
@@ -447,15 +485,14 @@ class Trace(Operator):
     ):
         """Construct trace operators and their inverse for a given set of subdomains.
 
-        The operators will be ordered according to the ordering in grids, or the order
-        of the GridBucket iteration over grids. Iit is critical that the same ordering
-        is used by other operators.
+        The operators will be ordered according to the ordering in grids. It is critical
+        that the same ordering is used by other operators.
 
         Parameters:
             grids (List of pp.Grid): List of grids. The order of the grids in the list
                 sets the ordering of the trace operators.
-            is_scalar (bool, optional): If true, trace operators are constructed for
-                scalar quantities.
+            nd (int, optional): Dimension of the quantities to be projected. Defaults to 1.
+            name (str, optional): Name of the operator. Default is None.
 
         """
         super().__init__(name=name)
@@ -486,7 +523,6 @@ class Trace(Operator):
                 inv_trace.append(div * face_projections[g].T)
             else:
                 raise NotImplementedError("kronecker")
-
         # Stack both trace and inv_trace vertically to make them into mappings to
         # global quantities.
         # Wrap the stacked matrices into an Ad object
@@ -530,6 +566,7 @@ class Divergence(Operator):
             grids (List of pp.Grid): List of grids. The order of the grids in the list
                 sets the ordering of the divergence operators.
             dim (int, optional): Dimension of vector field. Defaults to 1.
+            name (str, optional): Name to be assigned to the operator. Default is None.
 
         """
         super().__init__(name=name)
@@ -549,7 +586,6 @@ class Divergence(Operator):
         for g in self.grids:
             nf += g.num_faces * g.dim
             nc += g.num_cells * g.dim
-
         s += f"The total size of the matrix is ({nc}, {nf})\n"
 
         return s
@@ -595,9 +631,8 @@ class BoundaryCondition(Operator):
     ):
         """Construct a wrapper for boundary conditions for a set of subdomains.
 
-        The boundary values will be ordered according to the ordering in grids, or theorder
-        ordre of the GridBucket iteration over grids. Iit is critical that the same
-        ordering is used by other operators.
+        The boundary values will be ordered according to the ordering in grids. It is
+        critical that the same ordering is used by other operators.
 
         IMPLEMENTATION NOTE: Only scalar quantities so far; vector operators will be
         added in due course.
@@ -610,8 +645,7 @@ class BoundaryCondition(Operator):
                 to get the relevant boundary conditions.
             grids (List of pp.Grid): List of grids. The order of the grids in the list
                 sets the ordering of the boundary values.
-            gb (pp.GridBucket): Used if grid list is not provided. The order of the
-                grids is set according to iteration over the GridBucket nodes.
+            name (str, optional): Name to be assigned to the operator. Default is None.
 
         """
         super().__init__(name=name)
@@ -625,11 +659,9 @@ class BoundaryCondition(Operator):
         dims = np.zeros(4, dtype=int)
         for g in self.grids:
             dims[g.dim] += 1
-
         for d in range(3, -1, -1):
             if dims[d] > 0:
                 s += f"{dims[d]} grids of dimension {d}\n"
-
         return s
 
     def __str__(self) -> str:
@@ -651,7 +683,6 @@ class BoundaryCondition(Operator):
         for g in self.grids:
             data = gb.node_props(g)
             val.append(data[pp.PARAMETERS][self.keyword]["bc_values"])
-
         return np.hstack([v for v in val])
 
 
@@ -699,37 +730,33 @@ class ParameterArray(Operator):
 
     """
 
-    # TODO: Eventually, we should settle for ScalarSource or ScalarSourceAD
-    # TODO: Also, we should decide if this really belongs here in grid_operators.py
-    #      or rather in discretizations.py. To be decided later.
-
     def __init__(
         self,
         param_keyword: str,
         array_keyword: str,
         grids: Optional[List[pp.Grid]] = None,
         edges: Optional[List[Edge]] = None,
+        matrix_representation: bool = False,
         name: Optional[str] = None,
     ):
-        """Construct a wrapper for scalar sources for a set of subdomains.
+        """Construct a wrapper for parameter arrays for a set of subdomains.
 
-        The values of the source terms will be ordered according to the ordering
+        The values of the parameter will be ordered according to the ordering
         in grids, or the order of the GridBucket iteration over grids. It is
         critical that the same ordering is used by other operators.
 
-        IMPLEMENTATION NOTE: This class only takes care of scalar sources. Vector
-        sources (as the ones used for mechanics) will be included later.
+        IMPLEMENTATION NOTE: This class only takes care of parameter arrays. For
+            parameters which are (left) multiplied with other terms, use ParameterMatrix.
 
         Parameters:
-
             param_keyword (str): Keyword that should be used to access the data dictionary
                 to get the relevant parameter dictionary (same way as discretizations
                 pick out their parameters).
             grids (List of pp.Grid): List of grids. The order of the grids in the list
-                sets the ordering of the parameter values.
-           edges (List of tuples of pp.Grid): List of edges. The order of the edges in the list
-                sets the ordering of the parameter values.
-
+                establishes the ordering of the parameter values.
+            edges (List of tuples of pp.Grid): List of edges. The order of the edges in the
+                list establishes the ordering of the parameter values.
+            name (str, optional): Name to be assigned to the array. Default is None.
 
         Example:
             To get the source term for a flow equation initialize with param_keyword='flow',
@@ -747,7 +774,6 @@ class ParameterArray(Operator):
                 )
         elif edges is None:
             edges = []
-
         self.param_keyword = param_keyword
         self.array_keyword = array_keyword
         self.grids: List[pp.Grid] = grids
@@ -756,18 +782,16 @@ class ParameterArray(Operator):
 
     def __repr__(self) -> str:
         s = (
-            f"Will access the parameter array with keyword {self.param_keyword}"
-            f" and array keyword {self.array_keyword}"
+            f"Will access the parameter with keyword {self.param_keyword}"
+            f" and keyword {self.array_keyword}"
         )
 
         dims = np.zeros(4, dtype=int)
         for g in self.grids:
             dims[g.dim] += 1
-
         for d in range(3, -1, -1):
             if dims[d] > 0:
                 s += f"{dims[d]} grids of dimension {d}\n"
-
         dims = np.zeros(4, dtype=int)
         for e in self.edges:
             # The mg and its dimension are not accessible without the gb.
@@ -777,7 +801,6 @@ class ParameterArray(Operator):
             if dims[d] > 0:
                 s += f"""{dims[d]} mortar grids with lower-dimensional neighbor
                 of dimension {d}\n"""
-
         return s
 
     def __str__(self) -> str:
@@ -802,14 +825,49 @@ class ParameterArray(Operator):
         for e in self.edges:
             data = gb.edge_props(e)
             val.append(data[pp.PARAMETERS][self.param_keyword][self.array_keyword])
-
         if len(val) > 0:
             return np.hstack([v for v in val])
         else:
             return np.array([])
 
 
-#### Helper methods below
+class ParameterMatrix(ParameterArray):
+    """Extract a matrix from the parameter dictionaries for a given set of grids.
+
+    Typical use: Parameters which are left multiplied with an ad expression. Note that
+        array parameters are represented by one diagonal matrix for each grid.
+
+    """
+
+    def __str__(self) -> str:
+        return f"ParameterArray({self.param_keyword})({self.array_keyword})"
+
+    def parse(self, gb: pp.GridBucket) -> np.ndarray:
+        """Convert the Ad expression into numerical values for the scalar sources,
+        in the form of an np.ndarray concatenated for all grids.
+
+        Pameteres:
+            gb (pp.GridBucket): Mixed-dimensional grid. The boundary condition will be
+                taken from the data dictionaries with the relevant keyword.
+
+        Returns:
+            np.ndarray: Value of boundary conditions.
+
+        """
+        val = []
+        for g in self.grids:
+            data = gb.node_props(g)
+            val.append(data[pp.PARAMETERS][self.param_keyword][self.array_keyword])
+        for e in self.edges:
+            data = gb.edge_props(e)
+            val.append(data[pp.PARAMETERS][self.param_keyword][self.array_keyword])
+        if len(val) > 0:
+            return sps.diags(np.hstack([v for v in val]))
+        else:
+            return sps.csr_matrix((0, 0))
+
+
+# Helper methods below
 
 
 def _subgrid_projections(
@@ -839,10 +897,12 @@ def _subgrid_projections(
         )
         cell_sz = g.num_cells * nd
 
+        # Create matrix and convert to csc format, since the number of rows is (much)
+        # higher than the number of columns.
         cell_projection[g] = sps.coo_matrix(
             (np.ones(cell_sz), (cell_ind, np.arange(cell_sz))),
             shape=(tot_num_cells, cell_sz),
-        ).tocsr()
+        ).tocsc()
         cell_offset = cell_ind[-1] + 1
 
         if "mortar_grid" not in g.name:
@@ -853,7 +913,8 @@ def _subgrid_projections(
             face_projection[g] = sps.coo_matrix(
                 (np.ones(face_sz), (face_ind, np.arange(face_sz))),
                 shape=(tot_num_faces, face_sz),
-            ).tocsr()
+            ).tocsc()  # Again use csc storage, since num_cols < num_rows
+
             # Correct start of the numbering for the next grid
             if g.dim > 0:
                 # Point grids have no faces
