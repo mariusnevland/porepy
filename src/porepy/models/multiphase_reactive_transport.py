@@ -10,8 +10,6 @@ import numpy as np
 import scipy.sparse as sps
 import scipy.sparse.linalg as spla
 
-from tests import unit
-
 # Shorthand typing
 interface_type = Tuple[pp.Grid, pp.Grid]
 grid_like_type = Union[pp.Grid, interface_type]
@@ -60,12 +58,22 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
         self.num_reactions = 0
 
+        self.element_reduction_matrix = sps.dia_matrix(
+            (np.ones(self.num_components), 0),
+            shape=(self.num_components, self.num_components),
+        ).tocsr()
+        self.num_elements = self.element_reduction_matrix.shape[0]
+
         ## Representation of variables
         # String representation of pressure variable
         self.pressure_variable: str = "p"
         # Stem of variable name for overall fractions of components. The full name
         # for component with index i will be f"{self.component_variable}_{i}"
         self.component_variable: str = "z"
+
+        # Stem of variable for element overall fractions. The full name for the element
+        # with index i will be f"{self.element_variable}_{i}"
+        self.element_variable: str = "ze"
 
         self.component_phase_variable: str = "x"
 
@@ -502,13 +510,17 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
             # Total molar fraction of each component
             for i in range(self.num_components):
-                if not any(
-                    self._component_present_in_phase[i, : self.num_fluid_phases]
-                ):
-                    continue
+                #      if not any(
+                #          self._component_present_in_phase[i, : self.num_fluid_phases]
+                #      ):
+                #          continue
                 primary_variables.update(
                     {f"{self.component_variable}_{i}": {"cells": 1}}
                 )
+
+            # Reduced elements, used for element reduction formulation
+            for i in range(self.num_elements):
+                primary_variables.update({f"{self.element_variable}_{i}": {"cells": 1}})
 
             # Phase mole fractions. Only in fluid phases
             primary_variables.update(
@@ -533,6 +545,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
                         primary_variables.update(
                             {f"{self.component_phase_variable}_{i}_{j}": {"cells": 1}}
                         )
+
             # The wording is a bit confusing here, these will not be taken as
             d[pp.PRIMARY_VARIABLES] = primary_variables
 
@@ -562,11 +575,17 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         self._ad.component: List[pp.ad.Variable] = []
 
         for i in range(self.num_components):
-            if not any(self._component_present_in_phase[i, : self.num_fluid_phases]):
-                continue
+            #        if not any(self._component_present_in_phase[i, : self.num_fluid_phases]):
+            #            continue
             name = f"{self.component_variable}_{i}"
             var = eqm.merge_variables([(g, name) for g in grid_list])
             self._ad.component.append(var)
+
+        self._ad.element: List[pp.ad.Variable] = []
+        for i in range(self.num_elements):
+            name = f"{self.element_variable}_{i}"
+            var = eqm.merge_variables([(g, name) for g in grid_list])
+            self._ad.element.append(var)
 
         # Represent component phases as an numpy array instead of a list, so that we
         # can access items by array[i, j], rather the more cumbersome array[i][j]
@@ -617,6 +636,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         # mole fractions and component phases.
         secondary_variables = (
             [self._ad.component[-1]]
+            + self._ad.element
             + self._ad.saturation
             + self._ad.phase_mole_fraction
             + list(self._ad.component_phase.values())
@@ -641,12 +661,12 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         return True
 
     def _fluid_phase_indices(self) -> np.ndarray:
-        """"Get the index of all fluid phases"""
+        """ "Get the index of all fluid phases"""
         # Assume the fluid phases are numbered first.
         return np.arange(self.num_fluid_phases)
 
     def _solid_phase_indices(self) -> np.ndarray:
-        """"Get the index of all solid phases"""
+        """ "Get the index of all solid phases"""
         # Assume the solid phases are numbered after the fluid phases.
         return np.arange(self.num_fluid_phases, self.num_phases)
 
@@ -667,6 +687,8 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         self._phase_mole_fraction_sum_equation()
 
         self._saturation_definition_equation()
+
+        self._element_component_equation()
 
         # Now that all equations are set, we define sets of primary and secondary
         # equations, and similar with variables. These will be used to represent
@@ -697,7 +719,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         secondary_equation_names = [
             name
             for name in list(eq_manager.equations.keys())
-            if name[:12] != "Mass_balance"
+            if name[:15] != "Element_balance"
         ]
 
         self._secondary_equation_manager = eq_manager.subsystem_equation_manager(
@@ -746,13 +768,13 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
 
         div = pp.ad.Divergence(grid_list, dim=1, name="Divergence")
 
-        component_mass_balance: List[pp.ad.Operator()] = []
+        adv_flux: Dict[int, pp.ad.Operator] = {}
 
         g = self.gb.grids_of_dimension(self.gb.dim_max())[0]
 
         for i in range(self.num_components):
             if not any(self._component_present_in_phase[i, : self.num_fluid_phases]):
-                continue
+                adv_flux[i] = pp.ad.Scalar(0)
             # Boundary conditions
             bc = pp.ad.ParameterArray(  # Not sure about this part - should there also be a phase-wise boundary condition?
                 param_keyword=upwind.keyword, array_keyword="bc_values", grids=[g]
@@ -761,21 +783,25 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             # and the boundary condition
             # FIXME: We need to account for both Neumann and Dirichlet boundary conditions,
             # and likely do some filtering.
-            adv_flux = component_flux[i] + upwind.bound_transport_neu * bc
+            adv_flux[i] = div * component_flux[i] + upwind.bound_transport_neu * bc
 
-            z_i = self._ad.component[i]
+        for i in range(self.num_elements):
+
+            e_i = self._ad.element[i]
             # accumulation term
             accum = (
                 mass.mass
-                * (z_i / rho_tot - z_i.previous_timestep() / rho_tot_prev_time)
+                * (e_i / rho_tot - e_i.previous_timestep() / rho_tot_prev_time)
                 / dt
             )
+            eq = accum
+            for j in self.element_reduction_matrix[i].nonzero()[1]:
+                eq += self.element_reduction_matrix[i, j] * adv_flux[j]
 
             # Append to set of conservation equations
-            component_mass_balance.append(accum + div * adv_flux)
-
-        for i, eq in enumerate(component_mass_balance):
-            self._eq_manager.equations[f"Mass_balance_component{i}"] = eq
+            eq.discretize(self.gb)
+            (e_i.previous_timestep() / rho_tot_prev_time).evaluate(self.dof_manager)
+            self._eq_manager.equations[f"Element_balance_{i}"] = eq
 
     def _single_phase_darcy(self) -> pp.ad.Operator:
         """Discretize single-phase Darcy's law using Mpfa.
@@ -848,12 +874,12 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             eq = self._ad.component[i] - phase_sum_i
             eq_manager.equations[f"Overall_comp_phase_comp_{i}"] = eq
 
-        eq = 0
+        eq = pp.ad.Scalar(1)
         for i in range(self.num_components):
             # Do not enforce this for components only present in the solid phase
-            if not np.any(self._component_present_in_phase[i, : self.num_fluid_phases]):
-                continue
-            eq += self._ad.component[i]
+            #      if not np.any(self._component_present_in_phase[i, : self.num_fluid_phases]):
+            #          continue
+            eq -= self._ad.component[i]
 
         eq_manager.equations["Sum_of_all_overall_components"] = eq
 
@@ -904,6 +930,37 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
             )
             self._eq_manager.equations[f"saturation_definition_{j}"] = eq
 
+    def _element_component_equation(self) -> None:
+        """ "Set relation between elements and components.
+
+        This is trivial, unless an element reduction technique is applied, e.g., in case
+        of chemical equilibrium.
+        """
+
+        rho_tot = 0
+        rho_element = 0
+
+        # https://stackoverflow.com/questions/4319014/iterating-through-a-scipy-sparse-vector-or-matrix/4319159#4319159
+        mat = self.element_reduction_matrix.tocoo()
+        for j in range(self.num_fluid_phases):
+            weighted_density = self._density(j) * self._ad.saturation[j]
+            rho_tot += weighted_density
+
+            s = 0
+            for i, val in zip(mat.col, mat.data):
+                if self._component_present_in_phase[i, j]:
+                    s += val * self._ad.component_phase[i, j]
+
+            rho_element += weighted_density * s
+
+        for ei in range(self.num_elements):
+            eq = self._ad.element[ei]
+            for row, i in zip(mat.row, mat.col):
+                if row == ei:
+                    eq -= self._ad.component[i] * rho_tot / rho_element
+
+            self._eq_manager.equations[f"element_component_relation_{ei}"] = eq
+
     #### Constitutive laws
 
     def _kinetic_reaction_rate(self, i: int) -> float:
@@ -929,7 +986,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         """
         sat = self._ad.saturation[j]
         # Brooks-Corey function
-        return pp.ad.Function(lambda x: x ** 2, "Rel. perm. liquid")(sat)
+        return pp.ad.Function(lambda x: x**2, "Rel. perm. liquid")(sat)
 
     def _density(
         self, j: Optional[int] = None, prev_time: bool = False
