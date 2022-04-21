@@ -456,7 +456,7 @@ class MultiphaseReactive(pp.models.abstract_model.AbstractModel):
         else:
             scaling = 0.2
 
-        return np.zeros(g.num_cells) * scaling
+        return np.ones(g.num_cells) * scaling
 
     def _viscosity(self, g: pp.Grid) -> np.ndarray:
         """Unitary viscosity.
