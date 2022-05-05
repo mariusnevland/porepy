@@ -448,6 +448,7 @@ class DofManager:
         grids: Optional[List[GridLike]] = None,
         variables: Optional[List[str]] = None,
         from_iterate: bool = False,
+        full_sized_array: bool = True,
     ) -> np.ndarray:
         """Assemble a vector from the variable state stored in nodes and edges in
         the GridBucket.
@@ -462,6 +463,11 @@ class DofManager:
             from_iterate (bool, optional): If True, assemble from iterates, and not the
                 state itself. Set this to True inside a non-linear scheme (Newton), False
                 at the end of a time step.
+            full_sized_array (bool, optional): if True, the assembled vector will have size
+                self.num_dofs(), and subsets of variables will be assembled into their
+                respective global indices. If False, a truncated vector containing only
+                variables specified by the grid-variable combination will be returned. The
+                variables are sorted according to their global ordering.
 
         Returns:
             np.ndarray: Vector, size equal to self.num_dofs(). Values taken from the
@@ -476,6 +482,10 @@ class DofManager:
             variables = list(set([key[1] for key in self.block_dof]))
 
         values = np.zeros(self.num_dofs())
+
+        # Keep track of which variables have been assembled so far.
+        # This is only used if full_sized_array is False.
+        all_dof_ind = []
 
         for g, var in itertools.product(grids, variables):
             if (g, var) not in self.block_dof:
@@ -495,7 +505,18 @@ class DofManager:
             else:
                 values[dof_ind] = data[pp.STATE][var].copy()
 
-        return values
+            all_dof_ind.append(dof_ind)
+
+        if full_sized_array:
+            # We should return a full sized array, independent of which
+            # grids and variables have been assembled.
+            return values
+        else:
+            # A truncated variable should be returned. The relevant indices
+            # are available in all_dof_ind, but we should sort them so as
+            # not to shuffle the variable values.
+            sorted_dof_ind = np.sort(np.hstack(all_dof_ind))
+            return values[sorted_dof_ind]
 
     def __str__(self) -> str:
         grid_likes = [key[0] for key in self.block_dof]
