@@ -12,9 +12,6 @@ class ExactSolution:
 
         # Symbolic variables
         x, y, t = sym.symbols("x y t")
-        self.x = x
-        self.y = y
-        self.t = t
 
         # Physical parameters
         self.lambda_s = 1.0
@@ -23,6 +20,86 @@ class ExactSolution:
         self.stor = 1.0
         self.mu_f = 1.0
         self.k = [[1.0, 0], [0, 1.0]]
+
+        # Exact solutions
+
+        # Pressure (user-defined)
+        self.pressure = t ** 2 * sym.sin(2 * sym.pi * x) * sym.cos(2 * sym.pi * y)
+
+        # Displacement (user-defined)
+        ux = t ** 2 * x * (1 - x) * sym.sin(2 * sym.pi * y)
+        uy = t ** 2 * sym.sin(2 * sym.pi * x) * sym.sin(2 * sym.pi * y)
+        self.displacement = [ux, uy]
+
+        # The rest of the attributes should not be modified
+
+        # Pressure gradient
+        gradpx = sym.diff(self.pressure, x)
+        gradpy = sym.diff(self.pressure, y)
+        self._gradp = [gradpx, gradpy]
+
+        # Darcy flux
+        qx = (
+                - self.k[0][0] * self.mu_f ** (-1) * self._gradp[0]
+                - self.k[0][1] * self.mu_f ** (-1) * self._gradp[1]
+        )
+        qy = (
+                - self.k[1][0] * self.mu_f ** (-1) * self._gradp[0]
+                - self.k[1][1] * self.mu_f ** (-1) * self._gradp[1]
+        )
+        self._q = [qx, qy]
+
+        # Divergence of Darcy flux
+        self._divq = sym.diff(self._q[0], x) + sym.diff(self._q[1], y)
+
+        # Divergece of displacement
+        self._divu = sym.diff(self.displacement[0], x) + sym.diff(self.displacement[1], y)
+
+        # Time derivative of pressure
+        self._dp_dt = sym.diff(self.pressure, t)
+
+        # Time derivative of divergence of the displacement
+        self._ddivu_dt = sym.diff(self._divu, t)
+
+        # Flow source
+        ff_t1 = self.stor * self._dp_dt
+        ff_t2 = self.alpha * self._ddivu_dt
+        ff_t3 = self._divq
+        self.flow_source = ff_t1 + ff_t2 + ff_t3
+
+        # Gradient of the displacement
+        uxx = sym.diff(self.displacement[0], x)
+        uxy = sym.diff(self.displacement[0], y)
+        uyx = sym.diff(self.displacement[1], x)
+        uyy = sym.diff(self.displacement[1], y)
+        self._gradu = [[uxx, uxy], [uyx, uyy]]
+
+        # Transpose of the gradient of the displacement
+        self._gradut = [[uxx, uyx], [uxy, uyy]]
+
+        # Strain
+        eps_xx = 0.5 * (self._gradu[0][0] + self._gradut[0][0])
+        eps_xy = 0.5 * (self._gradu[0][1] + self._gradut[0][1])
+        eps_yx = 0.5 * (self._gradu[1][0] + self._gradut[1][0])
+        eps_yy = 0.5 * (self._gradu[1][1] + self._gradut[1][1])
+        self._eps = [[eps_xx, eps_xy], [eps_yx, eps_yy]]
+
+        # Effective stress
+        trace_eps = self._eps[0][0] + self._eps[1][1]
+        sigmaeff_xx = self.lambda_s * trace_eps + 2 * self.mu_s * self._eps[0][0]
+        sigmaeff_xy = 2 * self.mu_s * self._eps[0][1]
+        sigmaeff_yx = 2 * self.mu_s * self._eps[1][0]
+        sigmaeff_yy = self.lambda_s * trace_eps + 2 * self.mu_s * self._eps[1][1]
+        self._sigmaeff = [[sigmaeff_xx, sigmaeff_xy], [sigmaeff_yx, sigmaeff_yy]]
+
+        # Total stress
+        sigma_xx = self._sigmaeff[0][0] - self.alpha * self.pressure
+        sigma_xy = self._sigmaeff[0][1]
+        sigma_yx = self._sigmaeff[1][0]
+        sigma_yy = self._sigmaeff[1][1] - self.alpha * self.pressure
+        self._sigmaeff = [[sigma_xx, sigma_xy], [sigma_yx, sigma_yy]]
+
+        # Divergence of total stress
 
     def pressure(self, output_type="sym"):
         """Exact pressure"""
