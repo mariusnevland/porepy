@@ -6,7 +6,7 @@ import sympy as sym
 
 from biot_manufactured_exact import ExactSolution
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 
 #%% Inherit class
@@ -26,19 +26,18 @@ class ManufacturedBiot(pp.ContactMechanicsBiot):
     def _source_scalar(self, g: pp.Grid) -> np.ndarray:
         """Override scalar source"""
         time = params.get("time")
-        return self.exact_sol.integrated_scalar_source(g, time)
+        return self.exact_sol.integrated_source_flow(g, 1)
 
     def _vector_source(self, g: pp.Grid) -> np.ndarray:
         """Override vector source"""
         time = params.get("time")
-        return self.exact_sol.integrated_vector_source(g, time)
+        return self.exact_sol.integrated_source_mechanics(g, 1)
 
 
 #%%
 ex = ExactSolution()
-params = {"time": 0.1}
+params = {"time": 0, "time_step": 1, "end_time": 1, "use_ad": True}
 model = ManufacturedBiot(ex, params)
-model.time_step = 0.1
 model.create_grid()
 gb = model.gb
 
@@ -48,18 +47,21 @@ g = model.gb.grids_of_dimension(2)[0]
 d = model.gb.node_props(model.gb.grids_of_dimension(2)[0])
 
 
-#%% Plot
+#%% Plot sources
 cc = g.cell_centers
-tt = 0.1
-ff = ex.scalar_source("fun")(cc[0], cc[1], tt)
-fsx = ex.vector_source("fun")[0](cc[0], cc[1], tt)
-fsy = ex.vector_source("fun")[1](cc[0], cc[1], tt)
-int_ff = ex.integrated_scalar_source(g, tt)
-int_fs = ex.integrated_vector_source(g, tt)
+ff = ex.eval_scalar(g, ex.source_flow, 1)
+fs = ex.eval_vector(g, ex.source_mechanics, 1)
+int_ff: np.ndarray = ex.integrated_source_flow(g, 1)
+int_fs: np.ndarray = ex.integrated_source_mechanics(g, 1)
 
-#pp.plot_grid(g, ff, plot_2d=True, title="Scalar source")
-#pp.plot_grid(g, fsx, plot_2d=True, title="Vector source (x)")
-#pp.plot_grid(g, fsy, plot_2d=True, title="Vector source (y)")
+pp.plot_grid(g, ff * g.cell_volumes, plot_2d=True, title="Scalar source")
+pp.plot_grid(g, fs[0] * g.cell_volumes, plot_2d=True, title="Vector source (x)")
+pp.plot_grid(g, fs[1] * g.cell_volumes, plot_2d=True, title="Vector source (y)")
 pp.plot_grid(g, int_ff, plot_2d=True, title="Integrated scalar source QP")
 pp.plot_grid(g, int_fs[::2], plot_2d=True, title="Integrated vector source (x) QP")
 pp.plot_grid(g, int_fs[1::2], plot_2d=True, title="Integrated vector source (y) QP")
+
+#%% Plot pressures
+pp.plot_grid(g, ex.eval_scalar(g, ex.pressure, 1), plot_2d=True, title="Exact pressure")
+pp.plot_grid(g, d[pp.STATE]["p"], plot_2d=True, title="Approximated pressure")
+
