@@ -26,30 +26,29 @@ class ExactSolution:
         # Exact solutions
 
         # Pressure (user-defined)
-        self.pressure = t * x * (1 - x) * sym.sin(2 * sym.pi * y)
+        self.pressure = t * x * (1 - x) * y * (1 - y)
 
         # Displacement (user-defined)
-        ux = t * x * (1 - x) * sym.sin(2 * sym.pi * y)
-        uy = t * sym.sin(2 * sym.pi * x) * sym.sin(2 * sym.pi * y)
+        ux = t * x * (1 - x) * y * (1 - y)
+        uy = - t * x * (1 - x) * y * (1 - y)
         self.displacement = [ux, uy]
 
         # The rest of the attributes should not be modified
 
         # Pressure gradient
-        gradpx = sym.diff(self.pressure, x)
-        gradpy = sym.diff(self.pressure, y)
-        self._pressure_gradient = [gradpx, gradpy]
+        self._pressure_gradient = [sym.diff(self.pressure, x), sym.diff(self.pressure, y)]
 
         # Darcy flux
-        qx = (
-                - self.k[0][0] * self.mu_f ** (-1) * self._pressure_gradient[0]
-                - self.k[0][1] * self.mu_f ** (-1) * self._pressure_gradient[1]
-        )
-        qy = (
-                - self.k[1][0] * self.mu_f ** (-1) * self._pressure_gradient[0]
-                - self.k[1][1] * self.mu_f ** (-1) * self._pressure_gradient[1]
-        )
-        self._darcy_flux = [qx, qy]
+        self._darcy_flux = [
+            (
+                - (self.k[0][0] / self.mu_f) * self._pressure_gradient[0]
+                - (self.k[0][1] / self.mu_f) * self._pressure_gradient[1]
+            ),
+            (
+                - (self.k[1][0] / self.mu_f) * self._pressure_gradient[0]
+                - (self.k[1][1] / self.mu_f) * self._pressure_gradient[1]
+            )
+        ]
 
         # Divergence of Darcy flux
         self._divergence_darcy_flux = (
@@ -75,14 +74,16 @@ class ExactSolution:
         )
 
         # Gradient of the displacement
-        uxx = sym.diff(self.displacement[0], x)
-        uxy = sym.diff(self.displacement[0], y)
-        uyx = sym.diff(self.displacement[1], x)
-        uyy = sym.diff(self.displacement[1], y)
-        self._gradient_displacement = [[uxx, uxy], [uyx, uyy]]
+        self._gradient_displacement = [
+            [sym.diff(self.displacement[0], x), sym.diff(self.displacement[0], y)],
+            [sym.diff(self.displacement[1], x), sym.diff(self.displacement[1], y)]
+        ]
 
         # Transpose of the gradient of the displacement
-        self._gradient_displacement_transpose = [[uxx, uyx], [uxy, uyy]]
+        self._gradient_displacement_transpose = [
+            [self._gradient_displacement[0][0], self._gradient_displacement[1][0]],
+            [self._gradient_displacement[0][1], self._gradient_displacement[1][1]]
+        ]
 
         # Strain
         eps_xx = 0.5 * (

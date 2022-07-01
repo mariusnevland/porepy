@@ -59,44 +59,52 @@ fs = ex.eval_vector(g, ex.source_mechanics, 1)
 int_ff = ex.integrated_source_flow(g, 1)
 int_fs = ex.integrated_source_mechanics(g, 1)
 
-pp.plot_grid(g, ff * g.cell_volumes, plot_2d=True, title="Scalar source")
-pp.plot_grid(g, fs[0] * g.cell_volumes, plot_2d=True, title="Vector source (x)")
-pp.plot_grid(g, fs[1] * g.cell_volumes, plot_2d=True, title="Vector source (y)")
-pp.plot_grid(g, int_ff, plot_2d=True, title="Integrated scalar source QP")
-pp.plot_grid(g, int_fs[::2], plot_2d=True, title="Integrated vector source (x) QP")
-pp.plot_grid(g, int_fs[1::2], plot_2d=True, title="Integrated vector source (y) QP")
+#%% Plot sources
+plot_source = False
+if plot_source:
+    pp.plot_grid(g, ff * g.cell_volumes, plot_2d=True, title="Scalar source")
+    pp.plot_grid(g, fs[0] * g.cell_volumes, plot_2d=True, title="Vector source (x)")
+    pp.plot_grid(g, fs[1] * g.cell_volumes, plot_2d=True, title="Vector source (y)")
+    pp.plot_grid(g, int_ff, plot_2d=True, title="Integrated scalar source QP")
+    pp.plot_grid(g, int_fs[::2], plot_2d=True, title="Integrated vector source (x) QP")
+    pp.plot_grid(g, int_fs[1::2], plot_2d=True, title="Integrated vector source (y) QP")
 
-# Plot pressure
-pp.plot_grid(g, d[pp.STATE]["p"], plot_2d=True, title="Approximated pressure")
-pp.plot_grid(g, ex.eval_scalar(g, ex.pressure, 1), plot_2d=True, title="Exact pressure")
+# %% Plot pressure
+plot_pressure = True
+if plot_pressure:
+    pp.plot_grid(g, d[pp.STATE]["p"], plot_2d=True, title="Approximated pressure")
+    pp.plot_grid(g, ex.eval_scalar(g, ex.pressure, 1), plot_2d=True, title="Exact pressure")
 
-# Plot horizontal displacement
-pp.plot_grid(
-    g,
-    d[pp.STATE]["u"][::2],
-    plot_2d=True,
-    title="Approximated horizontal displacement"
-)
-pp.plot_grid(
-    g,
-    ex.eval_vector(g, ex.displacement, 1)[0],
-    plot_2d=True,
-    title="Exact horizontal displacement"
-)
+# %% Plot horizontal displacement
+plot_displacement = True
+if plot_displacement:
+    pp.plot_grid(
+        g,
+        d[pp.STATE]["u"][::2],
+        plot_2d=True,
+        title="Approximated horizontal displacement"
+    )
+    pp.plot_grid(
+        g,
+        ex.eval_vector(g, ex.displacement, 1)[0],
+        plot_2d=True,
+        title="Exact horizontal displacement"
+    )
 
-# Plot vertical displacement
-pp.plot_grid(
-    g,
-    d[pp.STATE]["u"][1::2],
-    plot_2d=True,
-    title="Approximated vertical displacement"
-)
-pp.plot_grid(
-    g,
-    ex.eval_vector(g, ex.displacement, 1)[1],
-    plot_2d=True,
-    title="Exact vertical displacement"
-)
+# %% Plot vertical displacement
+if plot_displacement:
+    pp.plot_grid(
+        g,
+        d[pp.STATE]["u"][1::2],
+        plot_2d=True,
+        title="Approximated vertical displacement"
+    )
+    pp.plot_grid(
+        g,
+        ex.eval_vector(g, ex.displacement, 1)[1],
+        plot_2d=True,
+        title="Exact vertical displacement"
+    )
 
 
 
