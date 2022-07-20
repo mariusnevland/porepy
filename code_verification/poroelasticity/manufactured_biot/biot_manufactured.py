@@ -28,39 +28,39 @@ class ManufacturedBiot(pp.ContactMechanicsBiot):
     def create_grid(self) -> None:
         """Create Cartesian structured mixed-dimensional grid."""
         ref_lvl = self.params.get("refinement_level")
-        phys_dims = [1.0, 1.0]
-        n_cells = [2 * 2 ** ref_lvl, 2 * 2 ** ref_lvl]
+        phys_dims = np.array([1, 1])
+        n_cells = np.array([2 * 2 ** ref_lvl, 2 * 2 ** ref_lvl])
         self.box = pp.geometry.bounding_box.from_points(np.array([[0, 0], phys_dims]).T)
-        g: pp.Grid = pp.CartGrid(n_cells, phys_dims)
-        g.compute_geometry()
-        self.gb: pp.GridBucket = pp.meshing._assemble_in_bucket([[g]])
+        sd: pp.Grid = pp.CartGrid(n_cells, phys_dims)
+        sd.compute_geometry()
+        self.mdg = pp.meshing.subdomains_to_mdg([[sd]])
 
     def before_newton_loop(self) -> None:
         """Assign time-dependent source terms."""
-        for g, d in self.gb:
+        for sd, data in self.mdg.subdomains(return_data=True):
             # Retrieve exact sources
-            source_flow_cc = self.exact_sol.eval_scalar(g, ex.source_flow, model.end_time)
+            source_flow_cc = self.exact_sol.eval_scalar(sd, ex.source_flow, model.end_time)
             source_mech_cc = np.asarray(
-                self.exact_sol.eval_vector(g, ex.source_mechanics, model.end_time)
+                self.exact_sol.eval_vector(sd, ex.source_mechanics, model.end_time)
             ).ravel("F")
 
             # Integrated sources (technically, we're applying the midpoint rule here).
-            int_source_flow_cc = source_flow_cc * g.cell_volumes
-            int_source_mech_cc = source_mech_cc * g.cell_volumes.repeat(g.dim)
+            int_source_flow_cc = source_flow_cc * sd.cell_volumes
+            int_source_mech_cc = source_mech_cc * sd.cell_volumes.repeat(sd.dim)
 
             # Note that we have to add the scaling of the time step explicitly
             # This might change when the Assembler class is discontinued, see issue #675
-            d[pp.PARAMETERS][self.scalar_parameter_key]["source"] = (
+            data[pp.PARAMETERS][self.scalar_parameter_key]["source"] = (
                 self.time_step * int_source_flow_cc
             )
-            d[pp.PARAMETERS][self.mechanics_parameter_key]["source"] = int_source_mech_cc
+            data[pp.PARAMETERS][self.mechanics_parameter_key]["source"] = int_source_mech_cc
 
 
 #%% Retrieve exact solution object
 ex = ExactBiotManufactured()
 
 # Define mesh sizes
-refinement_levels = np.array([1, 2, 3, 4, 5, 6])
+refinement_levels = np.array([1, 2, 3, 4, 5, 6, 7])
 
 # Create dictionary to store errors
 errors = {
@@ -87,21 +87,24 @@ for idx, refinement_level in enumerate(refinement_levels):
     # Run model
     tic = time()
     pp.run_time_dependent_model(model, params)
-    print(f"Refinement level {refinement_level}. Number of cells {model.gb.num_cells()}.")
+    print(f"Refinement level {refinement_level}")
+    print(f"Number of cells {model.mdg.num_subdomain_cells()}.")
     print(f"Simulation finished in {time() - tic} seconds.")
 
     # Retrieve approximated and exact values of primary variables
-    gb = model.gb
-    g = model.gb.grids_of_dimension(2)[0]
-    d = model.gb.node_props(g)
-    p_approx = d[pp.STATE][model.scalar_variable]
-    u_approx = d[pp.STATE][model.displacement_variable]
-    p_exact = ex.eval_scalar(g, ex.pressure, model.end_time)
-    u_exact = np.asarray(ex.eval_vector(g, ex.displacement, model.end_time)).ravel("F")
+    mdg = model.mdg
+    sd = model.mdg.subdomains(dim=2)[0]
+    data = mdg.subdomain_data(sd)
+    p_approx = data[pp.STATE][model.scalar_variable]
+    u_approx = data[pp.STATE][model.displacement_variable]
+    p_exact = ex.eval_scalar(sd, ex.pressure, model.end_time)
+    u_exact = np.asarray(ex.eval_vector(sd, ex.displacement, model.end_time)).ravel("F")
+    data[pp.STATE]["p_exact"] = p_exact
+    data[pp.STATE]["u_exact"] = u_exact
 
     # Measure error
-    error_p = ex.l2_relative_error(g, p_exact, p_approx, is_cc=True, is_scalar=True)
-    error_u = ex.l2_relative_error(g, u_exact, u_approx, is_cc=True, is_scalar=False)
+    error_p = ex.l2_relative_error(sd, p_exact, p_approx, is_cc=True, is_scalar=True)
+    error_u = ex.l2_relative_error(sd, u_exact, u_approx, is_cc=True, is_scalar=False)
 
     # Print summary
     print(f"Pressure error: {error_p}")
@@ -120,7 +123,7 @@ errors["order_u"] = np.log2(errors["reduction_u"])
 
 
 #%% Export solution
-exporter = pp.Exporter(model.gb, file_name="manu_biot", folder_name="out")
+exporter = pp.Exporter(mdg, file_name="manu_biot", folder_name="out")
 exporter.write_vtu(["p", "u"])
 
 #%% Plot
