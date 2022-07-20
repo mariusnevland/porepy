@@ -2,67 +2,75 @@
 from time import time
 import porepy as pp
 import numpy as np
-import scipy.sparse as sps
-import sympy as sym
-
-from biot_manufactured_exact import ExactSolution
-
-from typing import Dict, List, Optional
+from biot_manufactured_exact import ExactBiotManufactured
 
 
 #%% Inherit from ContactMechanicsBiot and override relevant methods
 class ManufacturedBiot(pp.ContactMechanicsBiot):
-    """Manufactured Biot class"""
+    """Class for setting up a manufactured solution for the Biot problem without fractures.
 
-    def __init__(
-        self,
-        exact_sol,
-        params: Optional[Dict] = None,
-    ) -> None:
+    Attributes:
+        exact_sol (ExactBiotManufactured): Exact solution object.
+
+    """
+    def __init__(self, exact_sol: ExactBiotManufactured, params: dict):
+        """
+        Constructor for the ManufacturedBiot class.
+
+        Args:
+            exact_sol: Exact solution object, containing the exact source terms.
+            params: Model parameters.
+
+        """
         super().__init__(params)
         self.exact_sol = exact_sol
 
     def create_grid(self) -> None:
-        """Create the grid bucket"""
-        self.box = {"xmin": 0.0, "xmax": 1.0, "ymin": 0.0, "ymax": 1.0}
-        network_2d = pp.FractureNetwork2d(None, None, self.box)
-        mesh_args = self.params.get("mesh_args", {"mesh_size_frac": 0.1})
-        self.gb: pp.GridBucket = network_2d.mesh(mesh_args)
+        """Create Cartesian structured mixed-dimensional grid."""
+        ref_lvl = self.params.get("refinement_level")
+        phys_dims = [1.0, 1.0]
+        n_cells = [2 * 2 ** ref_lvl, 2 * 2 ** ref_lvl]
+        self.box = pp.geometry.bounding_box.from_points(np.array([[0, 0], phys_dims]).T)
+        g: pp.Grid = pp.CartGrid(n_cells, phys_dims)
+        g.compute_geometry()
+        self.gb: pp.GridBucket = pp.meshing._assemble_in_bucket([[g]])
 
     def before_newton_loop(self) -> None:
-        """Here we retrieve the time dependent source terms"""
+        """Assign time-dependent source terms."""
         for g, d in self.gb:
-            exact_scalar_source = self.exact_sol.integrated_source_flow(g, self.time)
-            exact_vector_source = self.exact_sol.integrated_source_mechanics(
-                g, self.time
-            )
+            # Retrieve exact sources
+            source_flow_cc = self.exact_sol.eval_scalar(g, ex.source_flow, model.end_time)
+            source_mech_cc = np.asarray(
+                self.exact_sol.eval_vector(g, ex.source_mechanics, model.end_time)
+            ).ravel("F")
+
+            # Integrated sources (technically, we're applying the midpoint rule here).
+            int_source_flow_cc = source_flow_cc * g.cell_volumes
+            int_source_mech_cc = source_mech_cc * g.cell_volumes.repeat(g.dim)
+
             # Note that we have to add the scaling of the time step explicitly
             # This might change when the Assembler class is discontinued, see issue #675
             d[pp.PARAMETERS][self.scalar_parameter_key]["source"] = (
-                self.time_step * exact_scalar_source
+                self.time_step * int_source_flow_cc
             )
-            d[pp.PARAMETERS][self.mechanics_parameter_key][
-                "source"
-            ] = exact_vector_source
+            d[pp.PARAMETERS][self.mechanics_parameter_key]["source"] = int_source_mech_cc
 
 
-#%% Retrieve exact solution
-
-# Retrieve exact solution object
-ex = ExactSolution()
+#%% Retrieve exact solution object
+ex = ExactBiotManufactured()
 
 # Define mesh sizes
-mesh_sizes = np.array([0.1, 0.05, 0.025, 0.0125])
+refinement_levels = np.array([1, 2, 3, 4, 5, 6])
 
 # Create dictionary to store errors
 errors = {
-    "mesh_sizes": mesh_sizes,
-    "pressure": np.empty(shape=mesh_sizes.shape),
-    "displacement": np.empty(shape=mesh_sizes.shape)
+    "refinement_levels": refinement_levels,
+    "pressure": np.empty(shape=refinement_levels.shape),
+    "displacement": np.empty(shape=refinement_levels.shape)
 }
 
 # Converge loop
-for idx, mesh_size in enumerate(mesh_sizes):
+for idx, refinement_level in enumerate(refinement_levels):
 
     # Define simulation parameters
     params = {
@@ -70,7 +78,7 @@ for idx, mesh_size in enumerate(mesh_sizes):
         "time_step": 1.0,
         "end_time": 1.0,
         "use_ad": True,
-        "mesh_args": {"mesh_size_frac": mesh_size}
+        "refinement_level": refinement_level
     }
 
     # Construct model
@@ -79,7 +87,7 @@ for idx, mesh_size in enumerate(mesh_sizes):
     # Run model
     tic = time()
     pp.run_time_dependent_model(model, params)
-    print(f"Solving for mesh size {mesh_size}.")
+    print(f"Refinement level {refinement_level}. Number of cells {model.gb.num_cells()}.")
     print(f"Simulation finished in {time() - tic} seconds.")
 
     # Retrieve approximated and exact values of primary variables
@@ -98,6 +106,7 @@ for idx, mesh_size in enumerate(mesh_sizes):
     # Print summary
     print(f"Pressure error: {error_p}")
     print(f"Displacement error: {error_u}")
+    print()
 
     # Dump error into dictionary
     errors["pressure"][idx] = error_p
@@ -108,6 +117,11 @@ errors["reduction_p"] = errors["pressure"][:-1] / errors["pressure"][1:]
 errors["reduction_u"] = errors["displacement"][:-1] / errors["displacement"][1:]
 errors["order_p"] = np.log2(errors["reduction_p"])
 errors["order_u"] = np.log2(errors["reduction_u"])
+
+
+#%% Export solution
+exporter = pp.Exporter(model.gb, file_name="manu_biot", folder_name="out")
+exporter.write_vtu(["p", "u"])
 
 #%% Plot
 # cc = g.cell_centers
