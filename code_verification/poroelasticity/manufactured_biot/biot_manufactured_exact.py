@@ -11,7 +11,7 @@ SymMul = sym.core.mul.Mul
 SymAdd = sym.core.add.Add
 
 
-class ExactSolution:
+class ExactBiotManufactured:
     """Class containing the exact solutions to the manufactured Biot's problem.
 
     The exact solutions are taken from https://epubs.siam.org/doi/pdf/10.1137/15M1014280,
