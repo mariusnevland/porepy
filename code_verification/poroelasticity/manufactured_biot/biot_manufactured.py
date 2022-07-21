@@ -15,7 +15,7 @@ class ManufacturedBiot(pp.ContactMechanicsBiot):
     """
     def __init__(self, exact_sol: ExactBiotManufactured, params: dict):
         """
-        Constructor for the ManufacturedBiot class.
+        Constructor for the ManufacturedBiot class.x
 
         Args:
             exact_sol: Exact solution object, containing the exact source terms.
@@ -35,26 +35,28 @@ class ManufacturedBiot(pp.ContactMechanicsBiot):
         sd.compute_geometry()
         self.mdg = pp.meshing.subdomains_to_mdg([[sd]])
 
-    def before_newton_loop(self) -> None:
-        """Assign time-dependent source terms."""
+    def _source_scalar(self, sd: pp.Grid) -> np.ndarray:
+        """Integrated flow sources."""
         for sd, data in self.mdg.subdomains(return_data=True):
-            # Retrieve exact sources
-            source_flow_cc = self.exact_sol.eval_scalar(sd, ex.source_flow, model.end_time)
-            source_mech_cc = np.asarray(
+            # Retrieve exact source term
+            source_flow = self.exact_sol.eval_scalar(sd, ex.source_flow, model.end_time)
+            # Integrated source term
+            integrated_source_flow = source_flow * sd.cell_volumes
+            # Note that we have to scale the integrated sources with the time step explicitly.
+            # This might change when the Assembler class is discontinued, see issue #675
+            integrated_source_flow *= self.time_step
+            return integrated_source_flow
+
+    def _body_force(self, sd: pp.Grid) -> np.ndarray:
+        """Integrated mechanical sources."""
+        for sd, data in self.mdg.subdomains(return_data=True):
+            # Retrieve exact source term
+            body_force = np.asarray(
                 self.exact_sol.eval_vector(sd, ex.source_mechanics, model.end_time)
             ).ravel("F")
-
-            # Integrated sources (technically, we're applying the midpoint rule here).
-            int_source_flow_cc = source_flow_cc * sd.cell_volumes
-            int_source_mech_cc = source_mech_cc * sd.cell_volumes.repeat(sd.dim)
-
-            # Note that we have to add the scaling of the time step explicitly
-            # This might change when the Assembler class is discontinued, see issue #675
-            data[pp.PARAMETERS][self.scalar_parameter_key]["source"] = (
-                self.time_step * int_source_flow_cc
-            )
-            data[pp.PARAMETERS][self.mechanics_parameter_key]["source"] = int_source_mech_cc
-
+            # Integrated source term
+            integrated_body_force = body_force * sd.cell_volumes.repeat(sd.dim)
+            return integrated_body_force
 
 #%% Retrieve exact solution object
 ex = ExactBiotManufactured()
@@ -115,6 +117,15 @@ for idx, refinement_level in enumerate(refinement_levels):
     errors["pressure"][idx] = error_p
     errors["displacement"][idx] = error_u
 
+    # Save source terms in data dictionaries
+    source_flow = ex.eval_scalar(sd, ex.source_flow, model.end_time)
+    data[pp.STATE]["source_flow"] = source_flow
+
+    body_force = np.asarray(
+        ex.eval_vector(sd, ex.source_mechanics, model.end_time)
+    ).ravel("F")
+    data[pp.STATE]["source_mechanics"] = body_force
+
 # Determine rates of convergence
 errors["reduction_p"] = errors["pressure"][:-1] / errors["pressure"][1:]
 errors["reduction_u"] = errors["displacement"][:-1] / errors["displacement"][1:]
@@ -124,7 +135,7 @@ errors["order_u"] = np.log2(errors["reduction_u"])
 
 #%% Export solution
 exporter = pp.Exporter(mdg, file_name="manu_biot", folder_name="out")
-exporter.write_vtu(["p", "u"])
+exporter.write_vtu(["p", "u", "source_flow", "source_mechanics"])
 
 #%% Plot
 # cc = g.cell_centers
