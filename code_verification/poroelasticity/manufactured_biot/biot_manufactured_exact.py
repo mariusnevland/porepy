@@ -14,10 +14,12 @@ SymAdd = sym.core.add.Add
 class ExactBiotManufactured:
     """Class containing the exact solutions to the manufactured Biot's problem.
 
-    The exact solutions are taken from https://epubs.siam.org/doi/pdf/10.1137/15M1014280,
-    and for a single time step in an unit square domain are given by:
-        u(x1, x2) = [x1 * (1 - x) * sin(2 * pi * x2), sin(2 * pi * x1) * sin(2 * pi * x2)],
-        p(x1, x2) = x1 * (1 - x) * sin(2 * pi * x2),
+    The exact solutions are modified from https://epubs.siam.org/doi/pdf/10.1137/15M1014280
+    and are given by:
+
+        u(x, y, t) = t * [x * (1 - x) * sin(2 * pi * y), sin(2 * pi * x) * sin(2 * pi * y)],
+        p(x, y, t) = t * x * (1 - x) * sin(2 * pi * y),
+
     where u and p are respectively the displacement and fluid pressure.
 
     Analytical sources can therefore be obtained by computing the relevant expressions. This
