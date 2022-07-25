@@ -86,6 +86,7 @@ $RECYCLE.BIN/
 *.pvd
 *.vtu
 *.csv
+*.pvsm
 
 # Graphics formats
 *.vrml
@@ -179,4 +180,6 @@ nbproject/
 *.py_o
 *.txt
 *.pptx
-*.pvsm
+
+# Exclude specific folders
+!**/fig/
