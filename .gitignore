@@ -182,4 +182,4 @@ nbproject/
 *.pptx
 
 # Exclude specific folders
-!**/fig/
+!/fig/
