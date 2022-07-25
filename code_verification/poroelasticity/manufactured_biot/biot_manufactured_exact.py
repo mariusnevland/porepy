@@ -1,10 +1,9 @@
 import numpy as np
 import porepy as pp
-import quadpy as qp
 import scipy.sparse as sps
 import sympy as sym
 
-from typing import List, Literal, Union
+from typing import List, Union
 
 Scalar = Union[int, float]
 SymMul = sym.core.mul.Mul
@@ -175,97 +174,6 @@ class ExactBiotManufactured:
         )
         self.source_mechanics: List[SymAdd] = [fs_x, fs_y]
 
-    def integrated_source_flow(self, g: pp.Grid, time: float) -> np.ndarray:
-        """Computes the integrated scalar sources over the grid.
-
-        Args:
-            g: PorePy grid.
-            time: Time at which the exact source must be evaluated.
-
-        Returns:
-            integrated_source: Numerically integrated sources. Shape is (g.num_cells, ).
-
-        Raises:
-            ValuError: If the grid dimension is different from 2.
-
-        """
-
-        # Sanity check
-        if g.dim != 2:
-            raise ValueError("Expected two-dimensional grid.")
-
-        # Symbolic variables
-        x, y, t = sym.symbols("x y t")
-
-        # Retrieve QuadPy elements and declare numerical integration parameters
-        elements = self.get_quadpy_elements(g)
-        method = qp.t2.get_good_scheme(4)
-
-        # Retrieve scalar source term
-        f = self.source_flow
-
-        # Lambdify expression
-        f_fun = sym.lambdify((x, y, t), f, "numpy")
-
-        # Declare integrand
-        def integrand(coo):
-            return f_fun(coo[0], coo[1], time)
-
-        # Compute integration
-        integrated_source = method.integrate(integrand, elements)
-
-        return integrated_source
-
-    def integrated_source_mechanics(self, g: pp.Grid, time: float) -> np.ndarray:
-        """Computes the integrated vector sources over the grid.
-
-        Args:
-            g: PorePy grid.
-            time: Time at which the exact source must be evaluated.
-
-        Returns:
-            integrated_source: Numerically integrated sources. Shape is (g.num_cells *
-            g.dim, ).
-
-        Raises:
-            ValuError: If the grid dimension is different from 2.
-
-        """
-
-        # Sanity check
-        if g.dim != 2:
-            raise ValueError("Expected two-dimensional grid.")
-
-        # Symbolic variables
-        x, y, t = sym.symbols("x y t")
-
-        # Retrieve QuadPy elements and declare numerical integration parameters
-        elements = self.get_quadpy_elements(g)
-        method = qp.t2.get_good_scheme(4)
-
-        # Retrieve components of vector source term
-        f = self.source_mechanics
-
-        # Lambdify expression
-        f_fun_x = sym.lambdify((x, y, t), f[0], "numpy")
-        f_fun_y = sym.lambdify((x, y, t), f[1], "numpy")
-
-        # Declare integrands
-        def integrandx(coo):
-            return f_fun_x(coo[0], coo[1], time)
-
-        def integrandy(coo):
-            return f_fun_y(coo[0], coo[1], time)
-
-        # Compute integration
-        integrated_fx = method.integrate(integrandx, elements)
-        integrated_fy = method.integrate(integrandy, elements)
-        integrated_source = np.zeros(g.dim * g.num_cells)
-        integrated_source[::2] = integrated_fx
-        integrated_source[1::2] = integrated_fy
-
-        return integrated_source
-
     # -------------> Error related methods
     @staticmethod
     def l2_relative_error(
@@ -414,39 +322,3 @@ class ExactBiotManufactured:
         eval_exp = [[eval_exp_xx, eval_exp_xy], [eval_exp_yx, eval_exp_yy]]
 
         return eval_exp
-
-    @staticmethod
-    def get_quadpy_elements(g: pp.Grid) -> np.ndarray:
-        """
-        Assemble elements of a grid in QuadPy format to prepare for numerical integration.
-
-        For more details, see: https://pypi.org/project/quadpy/.
-
-        Args:
-            g: PorePy grid (simplicial for the moment).
-
-        Returns:
-            elements: Grid elements shaped in QuadPy format. Shape is (corners, cells, dim).
-                For triangles, this is (3, g.num_cells, 2).
-
-        """
-
-        # Getting node coordinates for each cell
-        nc = g.num_cells
-        cell_nodes_map, _, _ = sps.find(g.cell_nodes())
-        nodes_cell = cell_nodes_map.reshape(np.array([nc, g.dim + 1]))
-        nodes_coor_cell = g.nodes[:, nodes_cell]
-
-        # Stacking node coordinates
-        cnc_stckd = np.empty([nc, (g.dim + 1) * g.dim])
-        col = 0
-        for vertex in range(g.dim + 1):
-            for dim in range(g.dim):
-                cnc_stckd[:, col] = nodes_coor_cell[dim][:, vertex]
-                col += 1
-        element_coord = np.reshape(cnc_stckd, (nc, g.dim + 1, g.dim))
-
-        # Reshaping to please QuadPy format i.e, (corners, num_elements, coords)
-        elements = np.stack(element_coord, axis=-2)
-
-        return elements
