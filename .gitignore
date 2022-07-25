@@ -181,5 +181,5 @@ nbproject/
 *.txt
 *.pptx
 
-# Exclude specific folders
-!/fig/
+# Exclude folders with specifc names
+!**/fig/*
