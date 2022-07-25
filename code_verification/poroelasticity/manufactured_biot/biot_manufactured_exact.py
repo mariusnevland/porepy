@@ -1,6 +1,5 @@
 import numpy as np
 import porepy as pp
-import scipy.sparse as sps
 import sympy as sym
 
 from typing import List, Union
