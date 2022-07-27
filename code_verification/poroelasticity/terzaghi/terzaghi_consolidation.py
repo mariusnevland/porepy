@@ -100,9 +100,9 @@ class Terzaghi(pp.ContactMechanicsBiot):
         """Set intrinsic permeability for the flow subproblem"""
         return 0.001 * np.ones(sd.num_cells)
 
-    def _compressibility(self, sd: pp.Grid) -> Union[float, np.ndarray]:
-        """No compressibility effects in Terzaghi's model"""
-        return np.zeros(sd.num_cells)
+    def _storativity(self, sd: pp.Grid) -> np.ndarray:
+        """Zero storativity in Terzaghi's model"""
+        return 0.0 * np.zeros(sd.num_cells)
 
 
 #%% Main script
