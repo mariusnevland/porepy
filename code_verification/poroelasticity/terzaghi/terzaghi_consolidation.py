@@ -2,7 +2,7 @@ import numpy as np
 import porepy as pp
 
 from terzaghi_exact import ExactTerzaghi
-
+from typing import Union
 
 #%% Inherit model ContactMechanicsBiot class
 class Terzaghi(pp.ContactMechanicsBiot):
@@ -53,14 +53,15 @@ class Terzaghi(pp.ContactMechanicsBiot):
             Vectorial boundary condition representation.
 
         """
-        # Define boundary regions
-        all_bc, east, west, south, north, _, _ = self._domain_boundary_sides(sd)
+        # Inherit bc from parent class. This sets all bc faces as Dirichlet.
+        super()._bc_type_mechanics(sd=sd)
 
-        # Create a BoundaryConditionVectorial object setting all bc faces as Dirichlet type
-        pp.BoundaryConditionVectorial(sd, faces=all_bc, cond="dir")
+        # Define boundary regions, retrieve data dict, and bc object.
+        all_bc, east, west, south, north, _, _ = self._domain_boundary_sides(sd)
         data = self.mdg.subdomain_data(sd)
         bc = data[pp.PARAMETERS][self.mechanics_parameter_key]["bc"]
 
+        # Overwrite the default bc type at each side
         # North side: Neumann
         bc.is_neu[:, north] = True
         bc.is_dir[:, north] = False
@@ -99,12 +100,13 @@ class Terzaghi(pp.ContactMechanicsBiot):
         """Set intrinsic permeability for the flow subproblem"""
         return 0.001 * np.ones(sd.num_cells)
 
-    def _specific_volume(self, sd: pp.Grid) -> np.ndarray:
-
+    def _compressibility(self, sd: pp.Grid) -> Union[float, np.ndarray]:
+        """No compressibility effects in Terzaghi's model"""
+        return np.zeros(sd.num_cells)
 
 
 #%% Main script
-model_params = {}
+model_params = {"use_ad": True}
 model = Terzaghi(model_params)
 model.params["consolidation_coefficient"] = 1
 model.params["vertical_load"] = 1
@@ -112,6 +114,10 @@ model.prepare_simulation()
 
 sd = model.mdg.subdomains()[0]
 data = model.mdg.subdomain_data(sd)
+all_bc, east, west, south, north, _, _ = model._domain_boundary_sides(sd)
+bc_values = data[pp.PARAMETERS][model.mechanics_parameter_key]["bc_values"]
+bc_values_x = bc_values[::2]
+bc_values_y = bc_values[1::2]
 bc = data[pp.PARAMETERS][model.mechanics_parameter_key]["bc"]
 
 #%% Exact solution
