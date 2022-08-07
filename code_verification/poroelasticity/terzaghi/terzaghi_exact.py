@@ -34,13 +34,13 @@ class ExactTerzaghi:
         # Retrieve mixed-dimensional grid from the model class
         mdg: pp.MixedDimensionalGrid = terzaghi_model.mdg
 
-        # Get Cartesian grid
+        # Get grid
         sd: pp.Grid = mdg.subdomains()[0]
 
         # Retrieve cell centers in the vertical direction
-        self.cell_centers: np.ndarray = sd.cell_centers[1][:: sd.cart_dims[0]]
+        self.cell_centers: np.ndarray = sd.cell_centers[1]
 
-        # Define the roof value for stopping the sumation series of the analytical solution
+        # Define the roof value for stopping the summation series of the analytical solution
         self.roof_series: int = 1000
 
         # Retrieve the maximum vertical length, a.k.a the height of the column
@@ -90,7 +90,7 @@ class ExactTerzaghi:
                     / (self.height ** 2)
                 )
             )
-        dimless_p = (4 / np.pi) * self.F * sum_series
+        dimless_p = (4 / np.pi) * self.vert_load * sum_series
 
         return dimless_p
 

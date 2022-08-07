@@ -15,13 +15,12 @@ class Terzaghi(pp.ContactMechanicsBiot):
         super().__init__(params)
 
     def create_grid(self) -> None:
-        """Create a Cartesian grid with 10 horizontal cells and 40 vertical cells."""
-        phys_dims = np.array([1, 1])
-        n_cells = np.array([10, 30])
-        self.box = pp.geometry.bounding_box.from_points(np.array([[0, 0], phys_dims]).T)
-        sd: pp.Grid = pp.CartGrid(n_cells, phys_dims)
-        sd.compute_geometry()
-        self.mdg = pp.meshing.subdomains_to_mdg([[sd]])
+        """Create mixed dimensional grid"""
+        mesh_size = model.params.get("mesh_size", 0.1)
+        self.box = {"xmin": 0.0, "xmax": 1.0, "ymin": 0.0, "ymax": 1.0}
+        network_2d = pp.FractureNetwork2d(None, None, self.box)
+        mesh_args = {"mesh_size_bound": mesh_size, "mesh_size_frac": mesh_size}
+        self.mdg = network_2d.mesh(mesh_args)
 
     def _bc_type_scalar(self, sd: pp.Grid) -> pp.BoundaryCondition:
         """Define boundary condition types for the flow subproblem.
@@ -57,20 +56,16 @@ class Terzaghi(pp.ContactMechanicsBiot):
         # Inherit bc from parent class. This sets all bc faces as Dirichlet.
         super()._bc_type_mechanics(sd=sd)
 
-        # Define boundary regions, retrieve data dict, and bc object.
+        # Define boundary regions, retrieve data dict, and bc object
         _, east, west, north, south, *_ = self._domain_boundary_sides(sd)
         data = self.mdg.subdomain_data(sd)
         bc = data[pp.PARAMETERS][self.mechanics_parameter_key]["bc"]
 
         # East side: Roller
-        bc.is_neu[0, east] = False
-        bc.is_dir[0, east] = True
         bc.is_neu[1, east] = True
         bc.is_dir[1, east] = False
 
         # West side: Roller
-        bc.is_neu[0, west] = False
-        bc.is_dir[0, west] = True
         bc.is_neu[1, west] = True
         bc.is_dir[1, west] = False
 
@@ -79,19 +74,10 @@ class Terzaghi(pp.ContactMechanicsBiot):
         bc.is_dir[:, north] = False
 
         # South side: Roller
-        bc.is_neu[0, south] = True
-        bc.is_dir[0, south] = False
         bc.is_neu[1, south] = False
         bc.is_dir[1, south] = True
 
         return bc
-
-    # def _bc_values_scalar(self, sd: pp.Grid) -> np.ndarray:
-    #     """Set boundary condition values for the flow subproblem."""
-    #     _, _, _, north, *_ = self._domain_boundary_sides(sd)
-    #     bc_values = np.zeros(sd.num_faces)
-    #     bc_values[north] = self.params["vertical_load"]
-    #     return bc_values
 
     def _bc_values_mechanics(self, sd: pp.Grid) -> np.ndarray:
         """Set boundary condition values for the mechanics subproblem."""
@@ -121,18 +107,17 @@ class Terzaghi(pp.ContactMechanicsBiot):
         else:
             self.time_step = 1.0
 
-
 #%% Main script
 model_params = {
     "use_ad": True,
+    "mesh_size": 0.05,
     "time_step": 0.05,
-    "end_time": 0.05,
+    "end_time": 600.3,
     "consolidation_coefficient": 1.0,
-    "vertical_load": 1.0
+    "vertical_load": 1.0,
     }
 model = Terzaghi(model_params)
-model.prepare_simulation()
-# pp.run_time_dependent_model(model, model_params)
+pp.run_time_dependent_model(model, model_params)
 
 #%%
 sd = model.mdg.subdomains()[0]
@@ -143,18 +128,14 @@ bc_values_x = bc_values[::2]
 bc_values_y = bc_values[1::2]
 bc = data[pp.PARAMETERS][model.mechanics_parameter_key]["bc"]
 
+#%% Plot results
+sd = model.mdg.subdomains()[0]
+data = model.mdg.subdomain_data(sd)
+p = data[pp.STATE]["p"]
+pp.plot_grid(sd, p, plot_2d=True)
 
-# #%% Plot results
-# sd = model.mdg.subdomains()[0]
-# data = model.mdg.subdomain_data(sd)
-# p = data[pp.STATE]["p"]
-# pp.plot_grid(sd, p, plot_2d=True)
-#
-# #%%
-#
-#
-# #%% Exact solution
-# ex = ExactTerzaghi(terzaghi_model=model)
+#%% Exact solution
+ex = ExactTerzaghi(terzaghi_model=model)
 
 
 
