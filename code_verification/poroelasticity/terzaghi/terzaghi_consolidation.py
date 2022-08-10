@@ -2,7 +2,7 @@ import numpy as np
 import porepy as pp
 
 from terzaghi_exact import ExactTerzaghi
-from typing import Union
+from typing import Optional
 
 
 #%% Inherit model ContactMechanicsBiot class
@@ -94,6 +94,28 @@ class Terzaghi(pp.ContactMechanicsBiot):
         """Zero storativity in Terzaghi's model"""
         return np.ones(sd.num_cells)
 
+    def _confined_compressibility(self, sd: pp.Grid) -> np.ndarray:
+        stifness_tensor = self._stiffness_tensor(sd)
+        mu = stifness_tensor.mu
+        lmbda = stifness_tensor.lmbda
+        return 1 / (2 * mu + lmbda)
+
+    def _consolidation_coefficient(self, sd: pp.Grid) -> np.ndarray:
+        permeability = self._permeability(sd)
+        density = np.ones(sd.num_cells)
+        gravity = np.ones(sd.num_cells)
+        volumetric_weight = density * gravity
+        viscosity = self._viscosity(sd)
+        hydraulic_conductivity = (permeability * volumetric_weight) / viscosity
+        storativity = self._storativity(sd)
+        alpha_biot = self._biot_alpha(sd)
+        confined_compressibility = self._confined_compressibility(sd)
+        consolidation_coefficient = (
+            hydraulic_conductivity /
+            (volumetric_weight * (storativity + alpha_biot ** 2 * confined_compressibility))
+        )
+        return consolidation_coefficient
+
     def before_newton_loop(self) -> None:
         """Modify default time step"""
         if 0 < self.time <= 0.2:
@@ -107,6 +129,23 @@ class Terzaghi(pp.ContactMechanicsBiot):
         else:
             self.time_step = 1.0
 
+    def after_newton_convergence(self,
+                                 solution: np.ndarray,
+                                 errors: float,
+                                 iteration_counter: int,
+                                 ) -> None:
+        super().after_newton_convergence(solution, errors, iteration_counter)
+        step = model.time_index
+        self.exporter.write_vtu([model.scalar_variable], time_step=step)
+
+
+
+
+
+    def dimensionless_time(self) -> float:
+        """Computes dimensionless time."""
+
+
 #%% Main script
 model_params = {
     "use_ad": True,
@@ -115,6 +154,8 @@ model_params = {
     "end_time": 600.3,
     "consolidation_coefficient": 1.0,
     "vertical_load": 1.0,
+    "file_name": "terzaghi",
+    "folder_name": "out"
     }
 model = Terzaghi(model_params)
 pp.run_time_dependent_model(model, model_params)
