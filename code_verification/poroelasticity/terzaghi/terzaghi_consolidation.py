@@ -1,5 +1,6 @@
 import numpy as np
 import porepy as pp
+import matplotlib.pyplot as plt
 
 from terzaghi_exact import ExactTerzaghi
 from typing import Union, Optional
@@ -14,6 +15,9 @@ class Terzaghi(pp.ContactMechanicsBiot):
 
     def __init__(self, params: dict):
         super().__init__(params)
+
+        # Create a dictionary to store relevant data
+        self.sol = {t_idx: {} for t_idx in self.params["time_index"]}
 
     def create_grid(self) -> None:
         """Create mixed dimensional grid"""
@@ -177,37 +181,17 @@ class Terzaghi(pp.ContactMechanicsBiot):
         super().after_newton_convergence(solution, errors, iteration_counter)
 
         # Adjust time step
-        if 0.0 < self.time < 0.2:
-            self.time_step = 0.025
-        elif 0.2 <= self.time < 0.5:
-            self.time_step = 0.05
-        elif 0.5 <= self.time < 3.0:
-            self.time_step = 0.1
-        elif 3.0 <= self.time < 8.0:
-            self.time_step = 0.5
-        elif 8.0 <= self.time < 50.0:
-            self.time_step = 1.0
-        else:
-            self.time_step = 10.0
+        self.time_step *= 1.2
+        if self.time_step + self.time > self.end_time:
+            self.time_step = self.end_time - self.time
         self._ad.time_step._value = self.time_step
 
-        if self.time in self.params["schedule"]:
+        if self.time_index in self.params["time_index"]:
             # Store data
             sd = self.mdg.subdomains()[0]
-            data = self.mdg.subdomain_data(sd)
-            data[pp.STATE]["exact_dimless_p"] = self.exact_dimless_pressure(model.time)
-            data[pp.STATE]["dimless_p"] = self.dimensionless_pressure(sd)
-
-            # Export to ParaView
-            step = model.time_index
-            self.exporter.write_vtu(
-                [
-                    model.scalar_variable,
-                    "dimless_p",
-                    "exact_dimless_p"
-                ],
-                time_step=step,
-            )
+            model.sol[self.time_index]["p"] = self.dimensionless_pressure(sd)
+            model.sol[self.time_index]["t"] = self.time
+            model.sol[self.time_index]["p_ex"] = self.exact_dimless_pressure(self.time)
 
     # ----------> Analytical expressions
     def exact_dimless_pressure(self, t: Scalar) -> np.ndarray:
@@ -250,9 +234,10 @@ model_params = {
     "use_ad": True,
     "is_cartesian": False,
     "mesh_size": 0.025,
-    "time_step": 0.025,
+    "time_step": 0.05,
     "end_time": 600,
-    "schedule": [0.1, 0.25, 0.5, 1.0, 2.0, 10, 80, 150, 300, 600],
+    "schedule": [0.1, 0.25, 0.5, 1.0, 2.0, 10.0, 80.0, 150.0, 300.0, 600.0],
+    "time_index": [2, 4, 7, 10, 15, 25, 30, 43],
     "vertical_load": 1.0,
     "file_name": "terzaghi",
     "folder_name": "out",
@@ -266,14 +251,22 @@ print(f"Simulation finished in {time() - tic} seconds.")
 #%%
 sd = model.mdg.subdomains()[0]
 data = model.mdg.subdomain_data(sd)
-all_bc, east, west, north, south, _, _ = model._domain_boundary_sides(sd)
-bc_values = data[pp.PARAMETERS][model.mechanics_parameter_key]["bc_values"]
-bc_values_x = bc_values[::2]
-bc_values_y = bc_values[1::2]
-bc = data[pp.PARAMETERS][model.mechanics_parameter_key]["bc"]
+yc = sd.cell_centers[1]
+p = model.sol[2]["p"]
+half_max_diam = np.max(sd.cell_diameters()) / 2
+yc_eval = np.arange(0, 1.0, half_max_diam)
+closest_cells = sd.closest_cell(np.array([0.5 * np.ones_like(yc_eval), yc_eval]))
+_, idx = np.unique(closest_cells, return_index=True)
+yc_plot = closest_cells[np.sort(idx)]
 
-#%% Plot results
-sd = model.mdg.subdomains()[0]
-data = model.mdg.subdomain_data(sd)
-p = data[pp.STATE]["p"]
-pp.plot_grid(sd, p, plot_2d=True)
+# Preparing for ploting
+y_dimless = yc[yc_plot] / 1.0
+
+
+#%%
+fig = plt.figure(figsize=(8, 10))
+for idx in model.params["time_index"]:
+    plt.plot(model.sol[idx]["p"][yc_plot], y_dimless)
+plt.show()
+
+
