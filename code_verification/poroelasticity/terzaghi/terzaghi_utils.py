@@ -10,13 +10,10 @@ class TerzaghiUtilities:
     """Class containing the exact solutions to Terzaghi's consolidation problem.
 
     Attributes:
-        cell_centers (np.ndarray): Coordinates of the cell centers in the vertical
-            direction. The shape is (num_vertical_cells, ).
-        roof_series (int): Roof value for computing the summation series of the
-            analytical expressions.
-        height (Scalar): Heigh of the domain.
-        consol_coeff (Scalar): Coefficient of consolidation.
-        vert_load (Scalar): Vertical load imposed on the top boundary of the domain.
+        model (Terzaghi): Terzaghi model class.
+        upper_limit (int): Upper limit of summation in computation of exact solutions.
+        dimless_y (np.ndarray): Dimensionless vertical coordinates obtained by cutting the
+            domain trough the line (height/2, 0) (height/2, height).
 
     """
 
@@ -24,15 +21,15 @@ class TerzaghiUtilities:
         """Constructor for the class.
 
         Args:
-            terzaghi_model: Terzaghi model class. It is assumed that a Cartesian grid was
-                already created and computed. Morever, it is assumend that the coefficient of
-                consolidation is stored in `terzaghi_model.params["consolidation_coefficient"]`
-                and also the vertical load in `terzaghi_model.params["vertical_load"]`.
+            terzaghi_model: Terzaghi model class with mandatory parameters properly passed.
 
         """
 
         self.model = terzaghi_model
-        self.roof_series: int = 1000
+        self.upper_limit: int = self.model.params.get("upper_limit", 1000)
+
+        yc = self.model.mdg.subdomains()[0].cell_centers[1]
+        self.dimless_y = self.vert_cut(yc) / self.model.params["height"]
 
     # ---------> Physical parameters
     def confined_compressibility(self) -> np.ndarray:
@@ -73,7 +70,7 @@ class TerzaghiUtilities:
 
         return consolidation_coefficient
 
-    # ----------> Analytical solutions
+    # ----------> Analytical solutions and dimensionless quantities
     def dimless_t(self, t: Scalar) -> Scalar:
         """
         Compute exact dimensionless time.
@@ -91,7 +88,7 @@ class TerzaghiUtilities:
 
         return (t * c_f) / (h**2)
 
-    def dimless_p(self, t: Scalar) -> np.ndarray:
+    def dimless_p_ex(self, t: Scalar) -> np.ndarray:
         """
         Compute exact dimensionless pressure.
 
@@ -99,7 +96,7 @@ class TerzaghiUtilities:
             t: Time in seconds.
 
         Returns:
-            dimless_p: Dimensionless pressure profile for the given time `t`.
+            Dimensionless pressure profile for the given time `t`.
 
         """
 
@@ -110,19 +107,17 @@ class TerzaghiUtilities:
         dimless_t = self.dimless_t(t)
 
         sum_series = np.zeros_like(cc)
-        for i in range(1, self.roof_series + 1):
+        for i in range(1, self.upper_limit + 1):
             sum_series += (
                 (((-1) ** (i - 1)) / (2 * i - 1))
                 * np.cos((2 * i - 1) * (np.pi / 2) * (cc / h))
-                * np.exp(
-                    (-((2 * i - 1) ** 2)) * (np.pi**2 / 4) * dimless_t
-                )
+                * np.exp((-((2 * i - 1) ** 2)) * (np.pi**2 / 4) * dimless_t)
             )
         dimless_p = (4 / np.pi) * vert_load * sum_series
 
-        return dimless_p
+        return self.vert_cut(dimless_p)
 
-    def consol_deg(self, t: Scalar) -> Scalar:
+    def consol_deg_ex(self, t: Scalar) -> Scalar:
         """Compute the degree of consolidation for a given time.
 
         Args:
@@ -135,7 +130,7 @@ class TerzaghiUtilities:
 
         dimless_t = self.dimless_t(t)
         sum_series = 0
-        for i in range(1, self.roof_series + 1):
+        for i in range(1, self.upper_limit + 1):
             sum_series += (
                 1
                 / ((2 * i - 1) ** 2)
@@ -144,6 +139,48 @@ class TerzaghiUtilities:
         deg_cons = 1 - (8 / (np.pi**2)) * sum_series
 
         return deg_cons
+
+    def dimless_p_num(self, pressure: np.ndarray) -> np.ndarray:
+        """Dimensionalize pressure solution.
+
+        Args:
+            pressure (sd.num_cells, ): pressure solution.
+
+        Returns:
+            dimless_p (sd.num_cells, ): dimensionless pressure solution.
+
+        """
+
+        p_0 = self.model.params["vertical_load"]
+        dimless_pressure = pressure / p_0
+
+        return self.vert_cut(dimless_pressure)
+
+    def consol_deg_num(self, displacement: np.ndarray, pressure: np.ndarray) -> float:
+        """Numerical consolidation coefficient.
+
+        Args:
+            displacement (sd.dim * sd.num_cells, ): displacement solution.
+            pressure (sd.num_cells, ): pressure solution.
+
+        Returns:
+            consol_deg: consolidation coefficient.
+
+        """
+
+        sd = self.model.mdg.subdomains()[0]
+        h = self.model.params["height"]
+        m_v = np.mean(self.confined_compressibility())
+        vert_load = self.model.params["vertical_load"]
+        trace_u = self.displacement_trace(displacement, pressure)
+
+        u_inf = m_v * h * vert_load
+        u_0 = 0
+        u = np.max(np.abs(trace_u[1 :: sd.dim]))
+
+        consol_deg = (u - u_0) / (u_inf - u_0)
+
+        return consol_deg
 
     # -----------> Helper methods
     def vert_cut(self, array: np.ndarray) -> np.ndarray:
@@ -159,11 +196,48 @@ class TerzaghiUtilities:
         h = self.model.box["ymax"]
         half_max_diam = np.max(sd.cell_diameters()) / 2
         yc = np.arange(0, h, half_max_diam)
-        closest_cells = sd.closest_cell(np.array([h/2 * np.ones_like(yc), yc]))
+        closest_cells = sd.closest_cell(np.array([h / 2 * np.ones_like(yc), yc]))
         _, idx = np.unique(closest_cells, return_index=True)
         y_points = closest_cells[np.sort(idx)]
         cut_array = array[y_points]
 
         return cut_array
 
+    def displacement_trace(
+        self, displacement: np.ndarray, pressure: np.ndarray
+    ) -> np.ndarray:
+        """Project the displacement vector onto the faces.
 
+        Args:
+            displacement (sd.dim * sd.num_cells, ): displacement solution.
+            pressure (sd.num_cells, ): pressure solution.
+
+        Returns:
+            trace_u (sd.dim * sd.num_faces, ): trace of the displacement.
+
+        """
+
+        # Rename arguments
+        u = displacement
+        p = pressure
+
+        # Discretization matrices
+        sd = self.model.mdg.subdomains()[0]
+        data = self.model.mdg.subdomain_data(sd)
+        bound_u_cell = data[pp.DISCRETIZATION_MATRICES][
+            self.model.mechanics_parameter_key
+        ]["bound_displacement_cell"]
+        bound_u_face = data[pp.DISCRETIZATION_MATRICES][
+            self.model.mechanics_parameter_key
+        ]["bound_displacement_face"]
+        bound_u_pressure = data[pp.DISCRETIZATION_MATRICES][
+            self.model.mechanics_parameter_key
+        ]["bound_displacement_pressure"]
+
+        # Mechanical boundary values
+        bc_vals = data[pp.PARAMETERS][self.model.mechanics_parameter_key]["bc_values"]
+
+        # Compute trace of the displacement
+        trace_u = bound_u_cell * u + bound_u_face * bc_vals + bound_u_pressure * p
+
+        return trace_u
