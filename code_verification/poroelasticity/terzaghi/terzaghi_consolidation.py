@@ -2,7 +2,7 @@ import numpy as np
 import porepy as pp
 import matplotlib.pyplot as plt
 
-from terzaghi_exact import ExactTerzaghi
+from terzaghi_utils import ExactTerzaghi
 from typing import Union, Optional
 from time import time
 
@@ -24,7 +24,9 @@ class Terzaghi(pp.ContactMechanicsBiot):
         if self.params["is_cartesian"]:
             phys_dims = np.array([1, 1])
             n_cells = np.array([10, 10])
-            self.box = pp.geometry.bounding_box.from_points(np.array([[0, 0], phys_dims]).T)
+            self.box = pp.geometry.bounding_box.from_points(
+                np.array([[0, 0], phys_dims]).T
+            )
             sd: pp.Grid = pp.CartGrid(n_cells, phys_dims)
             sd.compute_geometry()
             self.mdg = pp.meshing.subdomains_to_mdg([[sd]])
@@ -109,11 +111,17 @@ class Terzaghi(pp.ContactMechanicsBiot):
         return bc_values.ravel("F")
 
     def _permeability(self, sd: pp.Grid) -> np.ndarray:
-        """Set intrinsic permeability for the flow subproblem"""
+        """Set intrinsic permeability for the flow subproblem
+
+        Units: m^2
+        """
         return 0.001 * np.ones(sd.num_cells)
 
     def _storativity(self, sd: pp.Grid) -> np.ndarray:
-        """Zero storativity in Terzaghi's model"""
+        """Zero storativity in Terzaghi's model
+
+        Units: 1/Pa
+        """
         return np.zeros(sd.num_cells)
 
     def _confined_compressibility(self, sd: pp.Grid) -> np.ndarray:
@@ -268,5 +276,3 @@ fig = plt.figure(figsize=(8, 10))
 for idx in model.params["time_index"]:
     plt.plot(model.sol[idx]["p"][yc_plot], y_dimless)
 plt.show()
-
-
