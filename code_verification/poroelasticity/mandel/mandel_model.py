@@ -81,7 +81,7 @@ class Mandel(pp.ContactMechanicsBiot):
         """
         super().__init__(params)
 
-        # Instantiate time step object
+        # Time parameters
         self.tsc = self.params["time_step_object"]
         self.time = self.tsc.time_init
         self.end_time = self.tsc.time_final
