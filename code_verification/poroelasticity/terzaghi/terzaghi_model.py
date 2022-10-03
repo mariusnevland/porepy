@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
 import porepy as pp
+import os
 
 from typing import Union
 
@@ -170,7 +171,7 @@ class Terzaghi(pp.ContactMechanicsBiot):
         super().after_newton_convergence(solution, errors, iteration_counter)
 
         # Adjust time step
-        self.time_step = self.tsc.next_time_step(5, recompute_solution=False)
+        self.time_step = self.tsc.next_time_step(5)
         self._ad.time_step._value = self.time_step
 
         # Store solutions
@@ -421,29 +422,18 @@ class Terzaghi(pp.ContactMechanicsBiot):
             p_num = self.sol[t]["p_num"]
             p_ex = self.exact_pressure(t)
 
-            # # Retrieve numerical and exact displacements
-            # u_num = self.sol[t]["u_num"]
-            # ux_num = u_num[::sd.dim]
-            # uy_num = u_num[1::sd.dim]
-            # u_ex = self.exact_displacement(t)
-            # ux_ex = u_ex[::sd.dim]
-            # uy_ex = u_ex[1::sd.dim]
-
             # Store relevant quantities
-            #self.sol[t]["dimless_xc"] = self.horizontal_cut(xc / a)
             self.sol[t]["dimless_yc"] = self.vertical_cut(yc / h)
 
             self.sol[t]["dimless_p_num"] = self.vertical_cut(p_num / F)
             self.sol[t]["dimless_p_ex"] = self.vertical_cut(p_ex / F)
 
-            # self.sol[t]["dimless_ux_num"] = self.horizontal_cut(ux_num / a)
-            # self.sol[t]["dimless_ux_ex"] = self.horizontal_cut(ux_ex / a)
-            # self.sol[t]["dimless_uy_num"] = self.horizontal_cut(uy_num / b)
-            # self.sol[t]["dimless_uy_ex"] = self.horizontal_c
-
     def plot_results(self):
-        """Plot dimensionless pressure, horizontal, and vertical displacements"""
+        """Plot dimensionless pressure"""
 
+        folder = "out/"
+        fnamep = "pressure"
+        extension = ".pdf"
         cmap = mcolors.ListedColormap(plt.cm.tab20.colors[: len(self.tsc.schedule)])
 
         # -----> Pressure plot
@@ -477,41 +467,11 @@ class Terzaghi(pp.ContactMechanicsBiot):
         ax.set_title("Normalized pressure profiles", fontsize=16)
         ax.grid()
         plt.subplots_adjust(right=0.7)
-        plt.show()
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        plt.savefig(folder + fnamep + extension, bbox_inches="tight")
+        plt.gcf().clear()
 
-        # # -----> Horizontal displacement plot
-        # fig, ax = plt.subplots(figsize=(9, 8))
-        # for idx, t in enumerate(self.tsc.schedule):
-        #     ax.plot(
-        #         self.sol[t]["dimless_xc"],
-        #         self.sol[t]["dimless_ux_ex"],
-        #         color=cmap.colors[idx],
-        #     )
-        #     ax.plot(
-        #         self.sol[t]["dimless_xc"],
-        #         self.sol[t]["dimless_ux_num"],
-        #         color=cmap.colors[idx],
-        #         linewidth=0,
-        #         marker=".",
-        #         markersize=8,
-        #     )
-        #     ax.plot(
-        #         [],
-        #         [],
-        #         color=cmap.colors[idx],
-        #         linewidth=0,
-        #         marker="s",
-        #         markersize=12,
-        #         label=rf"$t=${t}",
-        #     )
-        # ax.set_xlabel(r"$x/a$", fontsize=15)
-        # ax.set_ylabel(r"$u_x/a$", fontsize=15)
-        # ax.legend(loc="center right", bbox_to_anchor=(1.4, 0.5), fontsize=13)
-        # ax.set_title("Normalized horizontal displacement profiles", fontsize=16)
-        # ax.grid()
-        # plt.subplots_adjust(right=0.7)
-        # plt.show()
-        #
         # # -----> Errors as a function of time
         # error_p = np.asarray([self.sol[t]["error_pressure"] for t in self.tsc.schedule])
         # error_u = np.asarray(
@@ -531,31 +491,4 @@ class Terzaghi(pp.ContactMechanicsBiot):
         # ax.set_title("L2-errors as a function of time", fontsize=16)
         # ax.grid()
         # plt.show()
-
-
-#%% Runner
-tsc = pp.TimeSteppingControl(
-    schedule=[0.0, 1.0, 2.0, 7.0, 10.0],
-    dt_init=0.05,
-    dt_min_max=(0.05, 10.0)
-)
-
-model_params = {
-    "use_ad": True,
-    "height": 10.0,  # [m]
-    "mesh_size": 0.5,  # [m]
-    "applied_load": 6E8,  # [N/m]
-    "mu_lame": 2.475E9,  # [Pa],
-    "lambda_lame": 1.65E9,  # [Pa],
-    "alpha_biot": 1.0,  # [-]
-    "permeability": 9.86E-14,  # [m^2],
-    "viscosity": 1E-3,  # [Pa.s],
-    "fluid_density": 1E3,  # [kg/m^3],
-    "upper_limit_summation": 1000,
-    "time_step_object": tsc,
-    "plot_results": True
-}
-
-model = Terzaghi(model_params)
-pp.run_time_dependent_model(model, model_params)
 
