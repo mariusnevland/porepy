@@ -2,7 +2,9 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
 import porepy as pp
+import os
 import scipy.optimize as opt
+
 
 from typing import Literal, Union
 
@@ -27,7 +29,7 @@ class Mandel(pp.ContactMechanicsBiot):
                 50000.0,
             ],  # [s]
             dt_init=10.0,  # [s]
-            dt_min_max=(10.0, 1000.0)  # [s]
+            constant_dt=True
         )
         # Create model's parameter dictionary
         model_params = {
@@ -43,7 +45,6 @@ class Mandel(pp.ContactMechanicsBiot):
             "width": 100.0,  # [m]
             "mesh_size": 2.0,  # [m]
             "time_step_object": tsc,
-            "number_of_roots": 200,
             "plot_results": True,
         }
         # Run model
@@ -947,6 +948,10 @@ class Mandel(pp.ContactMechanicsBiot):
     def plot_results(self):
         """Plot dimensionless pressure, horizontal, and vertical displacements"""
 
+        folder = "out/"
+        fnamep = "pressure"
+        fnameux = "horizontal_displacement"
+        extension = ".pdf"
         cmap = mcolors.ListedColormap(plt.cm.tab20.colors[: len(self.tsc.schedule)])
 
         # -----> Pressure plot
@@ -980,7 +985,10 @@ class Mandel(pp.ContactMechanicsBiot):
         ax.set_title("Normalized pressure profiles", fontsize=16)
         ax.grid()
         plt.subplots_adjust(right=0.7)
-        plt.show()
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        plt.savefig(folder + fnamep + extension, bbox_inches="tight")
+        plt.gcf().clear()
 
         # -----> Horizontal displacement plot
         fig, ax = plt.subplots(figsize=(9, 8))
@@ -1013,26 +1021,29 @@ class Mandel(pp.ContactMechanicsBiot):
         ax.set_title("Normalized horizontal displacement profiles", fontsize=16)
         ax.grid()
         plt.subplots_adjust(right=0.7)
-        plt.show()
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        plt.savefig(folder + fnameux + extension, bbox_inches="tight")
+        plt.gcf().clear()
 
         # -----> Errors as a function of time
-        error_p = np.asarray([self.sol[t]["error_pressure"] for t in self.tsc.schedule])
-        error_u = np.asarray([self.sol[t]["error_displacement"] for t in self.tsc.schedule])
-        error_Q = np.asarray([self.sol[t]["error_flux"] for t in self.tsc.schedule])
-        error_T = np.asarray([self.sol[t]["error_traction"] for t in self.tsc.schedule])
-        times = np.asarray(self.tsc.schedule)
-
-        fig, ax = plt.subplots(figsize=(9, 8))
-        ax.loglog(times, error_p, "o-", label="Pressure error")
-        ax.loglog(times, error_u, "o-", label="Displacement error")
-        ax.loglog(times, error_Q, "o-", label="Flux error")
-        ax.loglog(times, error_T, "o-", label="Traction error")
-        ax.legend(fontsize=13)
-        ax.set_xlabel("Time [s]", fontsize=15)
-        ax.set_ylabel("Discrete L2-error [-]", fontsize=15)
-        ax.set_title("L2-errors as a function of time", fontsize=16)
-        ax.grid()
-        plt.show()
+        # error_p = np.asarray([self.sol[t]["error_pressure"] for t in self.tsc.schedule])
+        # error_u = np.asarray([self.sol[t]["error_displacement"] for t in self.tsc.schedule])
+        # error_Q = np.asarray([self.sol[t]["error_flux"] for t in self.tsc.schedule])
+        # error_T = np.asarray([self.sol[t]["error_traction"] for t in self.tsc.schedule])
+        # times = np.asarray(self.tsc.schedule)
+        #
+        # fig, ax = plt.subplots(figsize=(9, 8))
+        # ax.loglog(times, error_p, "o-", label="Pressure error")
+        # ax.loglog(times, error_u, "o-", label="Displacement error")
+        # ax.loglog(times, error_Q, "o-", label="Flux error")
+        # ax.loglog(times, error_T, "o-", label="Traction error")
+        # ax.legend(fontsize=13)
+        # ax.set_xlabel("Time [s]", fontsize=15)
+        # ax.set_ylabel("Discrete L2-error [-]", fontsize=15)
+        # ax.set_title("L2-errors as a function of time", fontsize=16)
+        # ax.grid()
+        # plt.show()
 
     def plot_field(
         self,
