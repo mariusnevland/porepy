@@ -245,7 +245,7 @@ class Mandel(pp.ContactMechanicsBiot):
         super().after_newton_convergence(solution, errors, iteration_counter)
 
         # Adjust time step
-        self.time_step = self.tsc.next_time_step(5, recompute_solution=False)
+        self.time_step = self.tsc.next_time_step(5)
         self._ad.time_step._value = self.time_step
 
         # Store solutions and errors

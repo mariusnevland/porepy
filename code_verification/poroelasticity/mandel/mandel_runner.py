@@ -1,3 +1,7 @@
+"""
+Runner script for Mandel's problem.
+"""
+
 import porepy as pp
 from mandel_model import Mandel
 from time import time
@@ -18,7 +22,6 @@ tsc = pp.TimeSteppingControl(
         50000.0,
     ],  # [s]
     dt_init=10.0,  # [s]
-    constant_dt=True
 )
 
 # Create model's parameter dictionary
