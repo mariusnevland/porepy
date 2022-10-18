@@ -972,13 +972,13 @@ class Exporter:
                     )
                 )
 
-                # # Grid edge number of each interface
-                # self._constant_interface_data[(intf, "grid_edge_number")] = np.hstack(
-                #     (
-                #         self._constant_interface_data[(intf, "grid_edge_number")],
-                #         intf_data["edge_number"] * ones,
-                #     )
-                # )
+                # Grid edge number of each interface
+                self._constant_interface_data[(intf, "grid_edge_number")] = np.hstack(
+                    (
+                        self._constant_interface_data[(intf, "grid_edge_number")],
+                        intf_data["edge_number"] * ones,
+                    )
+                )
 
                 # Whether the interface is mortar
                 self._constant_interface_data[(intf, "is_mortar")] = np.hstack(
