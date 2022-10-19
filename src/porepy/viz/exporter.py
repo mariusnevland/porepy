@@ -972,13 +972,15 @@ class Exporter:
                     )
                 )
 
-                # # Grid edge number of each interface
-                # self._constant_interface_data[(intf, "grid_edge_number")] = np.hstack(
-                #     (
-                #         self._constant_interface_data[(intf, "grid_edge_number")],
-                #         intf_data["edge_number"] * ones,
-                #     )
-                # )
+                # Grid edge number of each interface. Check that the key exists, as e.g.
+                # for a grid with a well it may not.
+                if 'edge_number' in intf_data:
+                    self._constant_interface_data[(intf, "grid_edge_number")] = np.hstack(
+                        (
+                            self._constant_interface_data[(intf, "grid_edge_number")],
+                            intf_data["edge_number"] * ones,
+                        )
+                    )
 
                 # Whether the interface is mortar
                 self._constant_interface_data[(intf, "is_mortar")] = np.hstack(
@@ -1927,6 +1929,9 @@ class Exporter:
         # Split the data for each group of geometrically uniform cells
         # Utilize meshio_geom for this.
         for field in fields:
+            # Do not export 'grid_edge_number' because of complications with the Well class
+            if field.name == 'grid_edge_number':
+                continue
 
             # Although technically possible, as implemented, field.values should never be None.
             assert field.values is not None
