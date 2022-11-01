@@ -177,6 +177,7 @@ nbproject/
 *.py_o
 *.txt
 *.pptx
+*.lprof
 
 # Exclude folders with specifc names
 !**/fig/*
