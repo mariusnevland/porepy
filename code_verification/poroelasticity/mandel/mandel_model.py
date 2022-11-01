@@ -14,21 +14,21 @@ class Mandel(pp.ContactMechanicsBiot):
 
     Example runscript:
         # Instantiate time step control object
-        tsc = pp.TimeSteppingControl(
+        time_manager = pp.TimeSteppingControl(
             schedule=[
-                0.0,
-                10.0,
-                50.0,
-                100.0,
-                1000.0,
-                5000.0,
-                8000.0,
-                10000.0,
-                20000.0,
-                30000.0,
-                50000.0,
+                0,
+                10,
+                50,
+                100,
+                1000,
+                5000,
+                8000,
+                10000,
+                20000,
+                30000,
+                50000,
             ],  # [s]
-            dt_init=10.0,  # [s]
+            dt_init=10,  # [s]
             constant_dt=True
         )
         # Create model's parameter dictionary
@@ -44,7 +44,7 @@ class Mandel(pp.ContactMechanicsBiot):
             "height": 10.0,  # [m]
             "width": 100.0,  # [m]
             "mesh_size": 2.0,  # [m]
-            "time_step_object": tsc,
+            "time_manager": time_manager,
             "plot_results": True,
         }
         # Run model
@@ -72,7 +72,7 @@ class Mandel(pp.ContactMechanicsBiot):
             height (float): Height of the domain [m].
             width (float): Width of the domain [m].
             mesh_size (float): Target mesh size (the one passed to gmsh) [m].
-            time_step_object (pp.TimeStepControl): Time step object, properly instantiated.
+            time_manager (pp.TimeManager): Time manager object, properly instantiated.
 
         Optional model parameters:
             number_of_roots (int, Defaults to 200): Number of roots used to approximate the
@@ -82,14 +82,8 @@ class Mandel(pp.ContactMechanicsBiot):
         """
         super().__init__(params)
 
-        # Time parameters
-        self.tsc = self.params["time_step_object"]
-        self.time = self.tsc.time_init
-        self.end_time = self.tsc.time_final
-        self.time_step = self.tsc.dt
-
         # Create a solution dictionary to store pressure and displacement solutions
-        self.sol = {t: {} for t in self.tsc.schedule}
+        self.sol = {t: {} for t in self.time_manager.schedule}
 
     def create_grid(self) -> None:
         """Create two-dimensional unstructured mixed-dimensional grid."""
@@ -113,28 +107,30 @@ class Mandel(pp.ContactMechanicsBiot):
         data = self.mdg.subdomain_data(sd)
 
         # Set initial pressure
-        data[pp.STATE][self.scalar_variable] = self.exact_pressure(0.0)
-        data[pp.STATE][pp.ITERATE][self.scalar_variable] = self.exact_pressure(0.0)
+        data[pp.STATE][self.scalar_variable] = self.exact_pressure(0)
+        data[pp.STATE][pp.ITERATE][self.scalar_variable] = self.exact_pressure(0)
 
         # Set initial displacement
-        data[pp.STATE][self.displacement_variable] = self.exact_displacement(0.0)
-        data[pp.STATE][pp.ITERATE][self.displacement_variable] = self.exact_displacement(0.0)
+        data[pp.STATE][self.displacement_variable] = self.exact_displacement(0)
+        data[pp.STATE][pp.ITERATE][
+            self.displacement_variable
+        ] = self.exact_displacement(0)
 
         # Store initial pressure and displacement distributions in the `sol` dictionary
-        self.sol[0.0]["p_num"] = self.exact_pressure(0.0)
-        self.sol[0.0]["p_ex"] = self.exact_pressure(0.0)
-        self.sol[0.0]["u_num"] = self.exact_displacement(0.0)
-        self.sol[0.0]["u_ex"] = self.exact_displacement(0.0)
-        self.sol[0.0]["Q_num"] = self.exact_flux(0.0)
-        self.sol[0.0]["Q_ex"] = self.exact_flux(0.0)
-        self.sol[0.0]["T_num"] = self.exact_traction(0.0)
-        self.sol[0.0]["T_ex"] = self.exact_traction(0.0)
-        self.sol[0.0]["U_num"] = 0.0
-        self.sol[0.0]["U_ex"] = 0.0
-        self.sol[0.0]["error_pressure"] = np.nan
-        self.sol[0.0]["error_displacement"] = np.nan
-        self.sol[0.0]["error_flux"] = np.nan
-        self.sol[0.0]["error_traction"] = np.nan
+        self.sol[0]["p_num"] = self.exact_pressure(0)
+        self.sol[0]["p_ex"] = self.exact_pressure(0)
+        self.sol[0]["u_num"] = self.exact_displacement(0)
+        self.sol[0]["u_ex"] = self.exact_displacement(0)
+        self.sol[0]["Q_num"] = self.exact_flux(0)
+        self.sol[0]["Q_ex"] = self.exact_flux(0)
+        self.sol[0]["T_num"] = self.exact_traction(0)
+        self.sol[0]["T_ex"] = self.exact_traction(0)
+        self.sol[0]["U_num"] = 0
+        self.sol[0]["U_ex"] = 0
+        self.sol[0]["error_pressure"] = np.nan
+        self.sol[0]["error_displacement"] = np.nan
+        self.sol[0]["error_flux"] = np.nan
+        self.sol[0]["error_traction"] = np.nan
 
     def _bc_type_scalar(self, sd: pp.Grid) -> pp.BoundaryCondition:
         """Define boundary condition types for the flow subproblem.
@@ -233,69 +229,65 @@ class Mandel(pp.ContactMechanicsBiot):
         """Update time for time-stepping technique and bc values."""
         super().before_newton_loop()
 
-        # Update time for the time-stepping control routine
-        self.tsc.time += self.time_step
-
         # Update value of boundary conditions
-        self.update_north_bc_values(self.time)
+        self.update_north_bc_values(self.time_manager.time)
 
     def after_newton_convergence(
         self, solution: np.ndarray, errors: float, iteration_counter: int
     ) -> None:
         super().after_newton_convergence(solution, errors, iteration_counter)
 
-        # Adjust time step
-        self.time_step = self.tsc.next_time_step(5)
-        self._ad.time_step._value = self.time_step
-
         # Store solutions and errors
         sd = self.mdg.subdomains()[0]
         data = self.mdg.subdomain_data(sd)
-        if self.time in self.tsc.schedule:
+        t = self.time_manager.time
+        if t in self.time_manager.schedule:
             # Displacement solutions
-            self.sol[self.time]["u_num"] = data[pp.STATE][self.displacement_variable]
-            self.sol[self.time]["u_ex"] = self.exact_displacement(self.time)
+            self.sol[t]["u_num"] = data[pp.STATE][self.displacement_variable]
+            self.sol[t]["u_ex"] = self.exact_displacement(t)
             # Pressure solutions
-            self.sol[self.time]["p_num"] = data[pp.STATE][self.scalar_variable]
-            self.sol[self.time]["p_ex"] = self.exact_pressure(self.time)
+            self.sol[t]["p_num"] = data[pp.STATE][self.scalar_variable]
+            self.sol[t]["p_ex"] = self.exact_pressure(t)
             # Flux solutions
             Q_num = self._fluid_flux([sd]).evaluate(self.dof_manager).val
-            self.sol[self.time]["Q_num"] = Q_num
-            self.sol[self.time]["Q_ex"] = self.exact_flux(self.time)
+            self.sol[t]["Q_num"] = Q_num
+            self.sol[t]["Q_ex"] = self.exact_flux(t)
             # Traction solutions
             self.reconstruct_stress()
-            self.sol[self.time]["T_num"] = data[pp.STATE]["stress"]
-            self.sol[self.time]["T_ex"] = self.exact_traction(self.time)
+            self.sol[t]["T_num"] = data[pp.STATE]["stress"]
+            self.sol[t]["T_ex"] = self.exact_traction(t)
             # Discrete L2-relative errors
-            self.sol[self.time]["error_pressure"] = self.l2_relative_error(
+            self.sol[t]["error_pressure"] = self.l2_relative_error(
                 sd=sd,
-                true_array=self.sol[self.time]["p_ex"] * self.params["width"] / self.params[
-                    "applied_load"],
-                approx_array=self.sol[self.time]["p_num"] * self.params["width"] / self.params[
-                    "applied_load"],
+                true_array=self.sol[t]["p_ex"]
+                * self.params["width"]
+                / self.params["applied_load"],
+                approx_array=self.sol[t]["p_num"]
+                * self.params["width"]
+                / self.params["applied_load"],
                 is_cc=True,
-                is_scalar=True
+                is_scalar=True,
             )
-            self.sol[self.time]["error_displacement"] = self.l2_relative_error(
+            self.sol[t]["error_displacement"] = self.l2_relative_error(
                 sd=sd,
-                true_array=self.sol[self.time]["u_ex"],
-                approx_array=self.sol[self.time]["u_num"],
+                true_array=self.sol[t]["u_ex"],
+                approx_array=self.sol[t]["u_num"],
                 is_cc=True,
-                is_scalar=False
+                is_scalar=False,
             )
-            self.sol[self.time]["error_flux"] = self.l2_relative_error(
+            self.sol[t]["error_flux"] = self.l2_relative_error(
                 sd=sd,
-                true_array=self.sol[self.time]["Q_ex"],
-                approx_array=self.sol[self.time]["Q_num"],
+                true_array=self.sol[t]["Q_ex"],
+                approx_array=self.sol[t]["Q_num"],
                 is_cc=False,
-                is_scalar=True
+                is_scalar=True,
             )
-            self.sol[self.time]["error_traction"] = self.l2_relative_error(
+            self.sol[t]["error_traction"] = self.l2_relative_error(
                 sd=sd,
-                true_array=self.sol[self.time]["T_ex"],
-                approx_array=self.sol[self.time]["T_num"],
+                true_array=self.sol[t]["T_ex"],
+                approx_array=self.sol[t]["T_num"],
                 is_cc=False,
-                is_scalar=False
+                is_scalar=False,
             )
 
     def after_simulation(self) -> None:
@@ -658,9 +650,9 @@ class Mandel(pp.ContactMechanicsBiot):
         sxx = np.zeros(sd.num_faces)  # sxx component of the stress is zero
         sxy = np.zeros(sd.num_faces)  # sxy (and syx) components of the stress are zero
 
-        if t == 0.0:  # traction force at t = 0 has a different expression
+        if t == 0:  # traction force at t = 0 has a different expression
             # Exact initial syy
-            syy = -F/a * np.ones(sd.num_faces)
+            syy = -F / a * np.ones(sd.num_faces)
             # Components of the initial traction force
             Tx = sxx * nx + sxy * ny  # zero traction force in the x-direction
             Ty = sxy * nx + syy * ny  # non-zero traction force in the y-direction
@@ -670,18 +662,20 @@ class Mandel(pp.ContactMechanicsBiot):
             # Retrieve approximated roots
             aa_n = self.approximate_roots()[:, np.newaxis]
             # Exact syy
-            c0 = -F/a
+            c0 = -F / a
             c1 = (-2 * F * (nu_u - nu_s)) / (a * (1 - nu_s))
             syy_sum1 = np.sum(
-                (np.sin(aa_n)) / (aa_n - np.sin(aa_n) * np.cos(aa_n))
+                (np.sin(aa_n))
+                / (aa_n - np.sin(aa_n) * np.cos(aa_n))
                 * np.cos(aa_n * xf / a)
-                * np.exp((-(aa_n ** 2) * c_f * t) / (a ** 2)),
+                * np.exp((-(aa_n**2) * c_f * t) / (a**2)),
                 axis=0,
             )
-            c2 = 2*F/a
+            c2 = 2 * F / a
             syy_sum2 = np.sum(
-                (np.sin(aa_n) * np.cos(aa_n)) / (aa_n - np.sin(aa_n) * np.cos(aa_n))
-                * np.exp((-(aa_n ** 2) * c_f * t) / (a ** 2)),
+                (np.sin(aa_n) * np.cos(aa_n))
+                / (aa_n - np.sin(aa_n) * np.cos(aa_n))
+                * np.exp((-(aa_n**2) * c_f * t) / (a**2)),
                 axis=0,
             )
             syy = c0 + c1 * syy_sum1 + c2 * syy_sum2
@@ -729,7 +723,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         # -----> Compute exact Darcy flux
 
-        if t == 0.0:  # initial Darcy flux is zero
+        if t == 0:  # initial Darcy flux is zero
             Q = np.zeros(sd.num_faces)
         else:
             # Retrieve approximated roots
@@ -737,9 +731,10 @@ class Mandel(pp.ContactMechanicsBiot):
             # x-component of specific discharge is non-zeros
             c0 = (2 * F * B * k * (1 + nu_u)) / (3 * mu_f * a**2)
             qx_sum0 = np.sum(
-                (aa_n * np.sin(aa_n)) / (aa_n - np.sin(aa_n) * np.cos(aa_n))
+                (aa_n * np.sin(aa_n))
+                / (aa_n - np.sin(aa_n) * np.cos(aa_n))
                 * np.sin(aa_n * xf / a)
-                * np.exp((-(aa_n ** 2) * c_f * t) / (a ** 2)),
+                * np.exp((-(aa_n**2) * c_f * t) / (a**2)),
                 axis=0,
             )
             qx = c0 * qx_sum0
@@ -780,7 +775,7 @@ class Mandel(pp.ContactMechanicsBiot):
         c0 = (4 * (1 - nu_u)) / (1 - 2 * nu_s)
         U_sum0 = np.sum(
             ((np.cos(a_n) * np.sin(a_n)) / (a_n - np.sin(a_n) * np.cos(a_n)))
-            * np.exp((-(a_n ** 2) * c_f * t) / (a ** 2))
+            * np.exp((-(a_n**2) * c_f * t) / (a**2))
         )
         U = 1.0 - c0 * U_sum0
 
@@ -856,11 +851,11 @@ class Mandel(pp.ContactMechanicsBiot):
 
     @staticmethod
     def l2_relative_error(
-            sd: pp.Grid,
-            true_array: np.ndarray,
-            approx_array: np.ndarray,
-            is_cc: bool,
-            is_scalar: bool,
+        sd: pp.Grid,
+        true_array: np.ndarray,
+        approx_array: np.ndarray,
+        is_cc: bool,
+        is_scalar: bool,
     ) -> float:
         """Compute the error measured in the discrete (relative) L2-norm.
 
@@ -918,7 +913,7 @@ class Mandel(pp.ContactMechanicsBiot):
         xc = sd.cell_centers[0]
         yc = sd.cell_centers[1]
 
-        for t in self.tsc.schedule:
+        for t in self.time_manager.schedule:
 
             # Retrieve numerical and exact pressures
             p_num = self.sol[t]["p_num"]
@@ -926,11 +921,11 @@ class Mandel(pp.ContactMechanicsBiot):
 
             # Retrieve numerical and exact displacements
             u_num = self.sol[t]["u_num"]
-            ux_num = u_num[::sd.dim]
-            uy_num = u_num[1::sd.dim]
+            ux_num = u_num[:: sd.dim]
+            uy_num = u_num[1 :: sd.dim]
             u_ex = self.exact_displacement(t)
-            ux_ex = u_ex[::sd.dim]
-            uy_ex = u_ex[1::sd.dim]
+            ux_ex = u_ex[:: sd.dim]
+            uy_ex = u_ex[1 :: sd.dim]
 
             # Store relevant quantities
             self.sol[t]["dimless_xc"] = self.horizontal_cut(xc / a)
@@ -952,11 +947,13 @@ class Mandel(pp.ContactMechanicsBiot):
         fnamep = "pressure"
         fnameux = "horizontal_displacement"
         extension = ".pdf"
-        cmap = mcolors.ListedColormap(plt.cm.tab20.colors[: len(self.tsc.schedule)])
+        cmap = mcolors.ListedColormap(
+            plt.cm.tab20.colors[: len(self.time_manager.schedule)]
+        )
 
         # -----> Pressure plot
         fig, ax = plt.subplots(figsize=(9, 8))
-        for idx, t in enumerate(self.tsc.schedule):
+        for idx, t in enumerate(self.time_manager.schedule):
             ax.plot(
                 self.sol[t]["dimless_xc"],
                 self.sol[t]["dimless_p_ex"],
@@ -992,7 +989,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         # -----> Horizontal displacement plot
         fig, ax = plt.subplots(figsize=(9, 8))
-        for idx, t in enumerate(self.tsc.schedule):
+        for idx, t in enumerate(self.time_manager.schedule):
             ax.plot(
                 self.sol[t]["dimless_xc"],
                 self.sol[t]["dimless_ux_ex"],
@@ -1055,7 +1052,7 @@ class Mandel(pp.ContactMechanicsBiot):
         sd = self.mdg.subdomains()[0]
 
         ratio = np.round(self.params["width"] / self.params["height"])
-        figsize = (int(5*ratio), 5)
+        figsize = (int(5 * ratio), 5)
 
         if field == "p_num":
             array = self.sol[t]["p_num"]
