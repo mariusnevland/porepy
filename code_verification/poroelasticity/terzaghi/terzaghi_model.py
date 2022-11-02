@@ -30,7 +30,7 @@ class Terzaghi(pp.ContactMechanicsBiot):
         Mandatory model parameters:
             height (float): Height of the domain.
             vertical_load (float): Applied vertical load.
-            time_stepping_object (pp.TimeSteppingControl): Time stepping control object.
+            time_manager (pp.TimeManager): Time stepping control object.
 
         Optional model parameters:
             mesh_size (float, Default is 0.1): Mesh size.
@@ -40,14 +40,9 @@ class Terzaghi(pp.ContactMechanicsBiot):
         """
         super().__init__(params)
 
-        # Time parameters
-        self.tsc = self.params["time_step_object"]
-        self.time = self.tsc.time_init
-        self.end_time = self.tsc.time_final
-        self.time_step = self.tsc.dt
-
         # Create a solution dictionary to store pressure and displacement solutions
-        self.sol = {t: {} for t in self.tsc.schedule}
+        self.sol = {counter: {} for counter in range(len(self.time_manager.schedule))}
+        self._ee: int = 0  # exporter counter
 
     def create_grid(self) -> None:
         """Create two-dimensional unstructured mixed-dimensional grid."""
@@ -69,10 +64,12 @@ class Terzaghi(pp.ContactMechanicsBiot):
         data[pp.STATE][pp.ITERATE][self.scalar_variable] = initial_p
 
         # Store initial pressure and displacement solutions
-        self.sol[0.0]["p_num"] = initial_p
-        self.sol[0.0]["p_ex"] = initial_p
-        self.sol[0.0]["u_num"] = np.zeros(sd.dim * sd.num_cells)
-        self.sol[0.0]["u_ex"] = np.zeros(sd.dim * sd.num_cells)
+        self.sol[self._ee]["time"] = self.time_manager.time
+        self.sol[self._ee]["dimless_t"] = self.dimensionless_time(self.time_manager.time)
+        self.sol[self._ee]["p_num"] = initial_p
+        self.sol[self._ee]["p_ex"] = initial_p
+        self.sol[self._ee]["u_num"] = np.zeros(sd.dim * sd.num_cells)
+        self.sol[self._ee]["u_ex"] = np.zeros(sd.dim * sd.num_cells)
 
     def _bc_type_scalar(self, sd: pp.Grid) -> pp.BoundaryCondition:
         """Define boundary condition types for the flow subproblem.
@@ -156,30 +153,24 @@ class Terzaghi(pp.ContactMechanicsBiot):
 
         return bc_values
 
-    def before_newton_loop(self):
-        super().before_newton_loop()
-
-        # Update time for the time-stepping control routine
-        self.tsc.time += self.time_step
-
     def after_newton_convergence(
-            self,
-            solution: np.ndarray,
-            errors: float,
-            iteration_counter: int,
+        self,
+        solution: np.ndarray,
+        errors: float,
+        iteration_counter: int,
     ) -> None:
         super().after_newton_convergence(solution, errors, iteration_counter)
-
-        # Adjust time step
-        self.time_step = self.tsc.next_time_step(5)
-        self._ad.time_step._value = self.time_step
 
         # Store solutions
         sd = self.mdg.subdomains()[0]
         data = self.mdg.subdomain_data(sd)
-        if self.time in self.tsc.schedule:
-            self.sol[self.time]["u_num"] = data[pp.STATE][self.displacement_variable]
-            self.sol[self.time]["p_num"] = data[pp.STATE][self.scalar_variable]
+        schedule = self.time_manager.schedule
+        if any([np.isclose(self.time_manager.time, t_sch) for t_sch in schedule]):
+            self._ee += 1  # increase exporter counter
+            self.sol[self._ee]["time"] = self.time_manager.time
+            self.sol[self._ee]["dimless_t"] = self.dimensionless_time(self.time_manager.time)
+            self.sol[self._ee]["u_num"] = data[pp.STATE][self.displacement_variable]
+            self.sol[self._ee]["p_num"] = data[pp.STATE][self.scalar_variable]
 
     def after_simulation(self) -> None:
         """Postprocess and plot results"""
@@ -189,7 +180,7 @@ class Terzaghi(pp.ContactMechanicsBiot):
 
     # Physical parameters
     def _permeability(self, sd: pp.Grid) -> np.ndarray:
-        """Overried value of intrinsic permeability [m^2].
+        """Override value of intrinsic permeability [m^2].
 
         Args:
             sd: Subdomain grid.
@@ -307,7 +298,7 @@ class Terzaghi(pp.ContactMechanicsBiot):
         h = self.params["height"]
         c_v = self.consolidation_coefficient()
 
-        return (t * c_v) / (h ** 2)
+        return (t * c_v) / (h**2)
 
     def exact_pressure(self, t: Union[float, int]) -> np.ndarray:
         """
@@ -362,7 +353,7 @@ class Terzaghi(pp.ContactMechanicsBiot):
         return cut_array
 
     def displacement_trace(
-            self, displacement: np.ndarray, pressure: np.ndarray
+        self, displacement: np.ndarray, pressure: np.ndarray
     ) -> np.ndarray:
         """Project the displacement vector onto the faces.
 
@@ -382,12 +373,12 @@ class Terzaghi(pp.ContactMechanicsBiot):
         # Discretization matrices
         sd = self.mdg.subdomains()[0]
         data = self.mdg.subdomain_data(sd)
-        bound_u_cell = data[pp.DISCRETIZATION_MATRICES][
-            self.mechanics_parameter_key
-        ]["bound_displacement_cell"]
-        bound_u_face = data[pp.DISCRETIZATION_MATRICES][
-            self.mechanics_parameter_key
-        ]["bound_displacement_face"]
+        bound_u_cell = data[pp.DISCRETIZATION_MATRICES][self.mechanics_parameter_key][
+            "bound_displacement_cell"
+        ]
+        bound_u_face = data[pp.DISCRETIZATION_MATRICES][self.mechanics_parameter_key][
+            "bound_displacement_face"
+        ]
         bound_u_pressure = data[pp.DISCRETIZATION_MATRICES][
             self.mechanics_parameter_key
         ]["bound_displacement_pressure"]
@@ -416,17 +407,18 @@ class Terzaghi(pp.ContactMechanicsBiot):
         h = self.params["height"]
         yc = sd.cell_centers[1]
 
-        for t in self.tsc.schedule:
+        for key in self.sol:
 
             # Retrieve numerical and exact pressures
-            p_num = self.sol[t]["p_num"]
+            t = self.sol[key]["time"]
+            p_num = self.sol[key]["p_num"]
             p_ex = self.exact_pressure(t)
 
             # Store relevant quantities
-            self.sol[t]["dimless_yc"] = self.vertical_cut(yc / h)
+            self.sol[key]["dimless_yc"] = self.vertical_cut(yc / h)
 
-            self.sol[t]["dimless_p_num"] = self.vertical_cut(p_num / F)
-            self.sol[t]["dimless_p_ex"] = self.vertical_cut(p_ex / F)
+            self.sol[key]["dimless_p_num"] = self.vertical_cut(p_num / F)
+            self.sol[key]["dimless_p_ex"] = self.vertical_cut(p_ex / F)
 
     def plot_results(self):
         """Plot dimensionless pressure"""
@@ -434,20 +426,20 @@ class Terzaghi(pp.ContactMechanicsBiot):
         folder = "out/"
         fnamep = "pressure"
         extension = ".pdf"
-        cmap = mcolors.ListedColormap(plt.cm.tab20.colors[: len(self.tsc.schedule)])
+        cmap = mcolors.ListedColormap(plt.cm.tab20.colors[: len(self.time_manager.schedule)])
 
         # -----> Pressure plot
         fig, ax = plt.subplots(figsize=(9, 8))
-        for idx, t in enumerate(self.tsc.schedule):
+        for key in self.sol:
             ax.plot(
-                self.sol[t]["dimless_p_ex"],
-                self.sol[t]["dimless_yc"],
-                color=cmap.colors[idx],
+                self.sol[key]["dimless_p_ex"],
+                self.sol[key]["dimless_yc"],
+                color=cmap.colors[key],
             )
             ax.plot(
-                self.sol[t]["dimless_p_num"],
-                self.sol[t]["dimless_yc"],
-                color=cmap.colors[idx],
+                self.sol[key]["dimless_p_num"],
+                self.sol[key]["dimless_yc"],
+                color=cmap.colors[key],
                 linewidth=0,
                 marker=".",
                 markersize=8,
@@ -455,14 +447,14 @@ class Terzaghi(pp.ContactMechanicsBiot):
             ax.plot(
                 [],
                 [],
-                color=cmap.colors[idx],
+                color=cmap.colors[key],
                 linewidth=0,
                 marker="s",
                 markersize=12,
-                label=rf"$t=${t}",
+                label=rf"$\tau=${np.round(self.sol[key]['dimless_t'], 6)}",
             )
-        ax.set_xlabel(r"$p/p_0$", fontsize=15)
-        ax.set_ylabel(r"$y/h$", fontsize=15)
+        ax.set_xlabel(r"$\tilde{p} = p/p_0$", fontsize=15)
+        ax.set_ylabel(r"$\tilde{y} = y/h$", fontsize=15)
         ax.legend(loc="center right", bbox_to_anchor=(1.4, 0.5), fontsize=13)
         ax.set_title("Normalized pressure profiles", fontsize=16)
         ax.grid()
@@ -491,4 +483,3 @@ class Terzaghi(pp.ContactMechanicsBiot):
         # ax.set_title("L2-errors as a function of time", fontsize=16)
         # ax.grid()
         # plt.show()
-
