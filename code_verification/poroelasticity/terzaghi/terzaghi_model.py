@@ -260,7 +260,7 @@ class Terzaghi(pp.ContactMechanicsBiot):
         return m_v
 
     def consolidation_coefficient(self) -> float:
-        """Consolidation coefficient [-].
+        """Consolidation coefficient [m^2 * s^-1}]
 
         Returns:
             c_v: coefficient of consolidation.
