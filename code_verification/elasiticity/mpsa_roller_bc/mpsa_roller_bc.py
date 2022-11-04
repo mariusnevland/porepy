@@ -17,7 +17,9 @@ class SimpleElastic(pp.ContactMechanics):
         if model.params["is_cartesian"]:
             phys_dims = np.array([1, 1])
             n_cells = np.array([10, 10])
-            self.box = pp.geometry.bounding_box.from_points(np.array([[0, 0], phys_dims]).T)
+            self.box = pp.geometry.bounding_box.from_points(
+                np.array([[0, 0], phys_dims]).T
+            )
             sd: pp.Grid = pp.CartGrid(n_cells, phys_dims)
             sd.compute_geometry()
             self.mdg = pp.meshing.subdomains_to_mdg([[sd]])
@@ -90,7 +92,7 @@ class SimpleElastic(pp.ContactMechanics):
 # Define model parameters
 model_params = {
     "use_ad": True,  # this we don't usually touch
-    "is_cartesian": False  # use False for simplicial unstructured grid
+    "is_cartesian": False,  # use False for simplicial unstructured grid
 }
 
 # Create model
@@ -105,5 +107,3 @@ data = model.mdg.subdomain_data(sd)
 u = data[pp.STATE][model.displacement_variable]
 u_mag = (u[::2] ** 2 + u[1::2] ** 2) ** 0.5
 pp.plot_grid(sd, u_mag, plot_2d=True, title=r"$|\vec{u}(x,y)|$")
-
-
