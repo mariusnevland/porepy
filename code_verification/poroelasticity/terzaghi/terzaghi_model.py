@@ -1,11 +1,10 @@
 """
 Implementation of Terzaghi's consolidation problem.
 
-Even though the model is strictly speaking a one-dimensional problem, the implemented model
-uses a two-dimensional unstructured grid with roller boundary conditions for the mechanical
-subproblem and no-flux boundary conditions for the flow subproblem in order to emulate the
-one-dimensional process.
-
+Even though Terzaghi's consolidation problem is strictly speaking one-dimensional, the
+current model employs a two-dimensional Cartesian grid with roller boundary conditions
+for the mechanical subproblem and no-flux boundary conditions for the flow subproblem on
+the sides of the domain such that the one-dimensional process can be emulated.
 """
 
 import matplotlib.pyplot as plt
@@ -18,58 +17,111 @@ from typing import Union
 
 
 class Terzaghi(pp.ContactMechanicsBiot):
-    """Parent class for Terzaghi's consolidation problem model."""
+    """Parent class for Terzaghi's consolidation problem model.
+
+    Examples:
+
+        .. code:: Python
+
+        # Time manager
+        time_manager = pp.TimeManager([0, 0.01, 0.1, 0.5, 1, 2], 0.001, constant_dt=True)
+
+        # Model parameters
+        params = {
+                'alpha_biot': 1.0,  # [-]
+                'height': 1.0,  # [m]
+                'lambda_lame': 1.65E9,  # [Pa]
+                'mu_lame': 1.475E9,  # [Pa]
+                'num_cells': 20,
+                'permeability': 9.86E-14,  # [m^2]
+                'perturbation_factor': 1E-6,
+                'plot_results': True,
+                'specific_weight': 9.943E3,  # [Pa * m^-1]
+                'time_manager': time_manager,
+                'upper_limit_summation': 1000,
+                'use_ad': True,
+                'vertical_load': 6E8,  # [N * m^-1]
+                'viscosity': 1E-3,  # [Pa * s]
+            }
+
+        # Run model
+        tic = time()
+        print("Simulation started...")
+        model = Terzaghi(params)
+        pp.run_time_dependent_model(model, params)
+        print(f"Simulation finished in {round(time() - tic)} sec.")
+
+    """
 
     def __init__(self, params: dict):
-        """
-        Constructor of the Terzaghi class.
+        """Constructor of the Terzaghi class.
 
         Args:
-            params: Model parameters.
+            params: Model parameters. Admissible entries are:
 
-        Mandatory model parameters:
-            height (float): Height of the domain.
-            vertical_load (float): Applied vertical load.
-            time_manager (pp.TimeManager): Time stepping control object.
-
-        Optional model parameters:
-            mesh_size (float, Default is 0.1): Mesh size.
-            upper_limit (int, Default is 1000): Upper limit of summation for computing exact
-                solutions.
+                - 'alpha_biot' : Biot constant (int or float).
+                - 'height' : Height of the domain in `m` (int or float).
+                - 'lambda_lame' : Lamé parameter in `Pa` (int or float).
+                - 'mu_lame' : Lamé parameter in `m` (int or float).
+                - 'num_cells' : Number of vertical cells (int).
+                - 'permeability' : Intrinsic permeability in `m^2` (int or float).
+                - 'pertubation_factor' : Perturbation factor (int or float). To be applied to
+                  the vertical node coordinates of the mesh. This is necessary to avoid
+                  singular matrices with MPSA and the use of roller boundary conditions.
+                - 'plot_results' : Whether to plot the results (bool). The resulting plot is
+                  saved inside the `out` folder.
+                - 'specific_weight' : Fluid specific weight in `Pa * m^-1` (int or float).
+                  Recall that the specific weight is density * gravity.
+                - 'time_manager' : Time manager object (pp.TimeManager).
+                - 'use_ad' : Whether to use ad (bool). Note that this must be set to True.
+                  Otherwise, an error will be raised.
+                - 'vertical_load' : Applied vertical load in `N * m^-1` (int or float).
+                - 'viscosity' : Fluid viscosity in `Pa * s` (int or float).
 
         """
         super().__init__(params)
 
-        # Create a solution dictionary to store pressure and displacement solutions
+        # ad sanity check
+        if not self.params["use_ad"]:
+            raise ValueError("Model only valid when ad is used.")
+
+        # Create a solution dictionary to store variables of interest
         self.sol = {counter: {} for counter in range(len(self.time_manager.schedule))}
-        self._ee: int = 0  # exporter counter
+
+        # Counter for storing variables of interest
+        self._store_counter: int = 0
 
     def create_grid(self) -> None:
-        """Create two-dimensional unstructured mixed-dimensional grid."""
+        """Create a two-dimensional Cartesian grid."""
+        n = self.params["num_cells"]
         h = self.params["height"]
-        mesh_size = self.params["mesh_size"]
-        self.box = {"xmin": 0.0, "xmax": h, "ymin": 0.0, "ymax": h}
-        network_2d = pp.FractureNetwork2d(None, None, self.box)
-        mesh_args = {"mesh_size_bound": mesh_size, "mesh_size_frac": mesh_size}
-        self.mdg = network_2d.mesh(mesh_args)
+        phys_dims = np.array([h, h])
+        n_cells = np.array([1, n])
+        self.box = pp.geometry.bounding_box.from_points(
+            np.array([[0, 0], phys_dims]).T
+        )
+        sd: pp.Grid = pp.CartGrid(n_cells, phys_dims)
+        sd.compute_geometry()
+        np.random.seed(35)  # this seed is fixed but completely arbitrary
+        # Perturb the y-coordinate of the physical nodes to avoid singular matrices with
+        # roller bc and MPSA. For Terzaghi's problem, perturb only the vertical coordinates,
+        # NOT the horizontal coordinates.
+        perturbation_factor = self.params["perturbation_factor"]
+        perturbation = np.random.rand(sd.num_nodes) * perturbation_factor
+        sd.nodes[1] += perturbation
+        sd.compute_geometry()
+        self.mdg = pp.meshing.subdomains_to_mdg([[sd]])
 
     def _initial_condition(self) -> None:
         """Override initial condition for the flow subproblem."""
         super()._initial_condition()
         sd = self.mdg.subdomains()[0]
         data = self.mdg.subdomain_data(sd)
-        F = self.params["applied_load"]
-        initial_p = F * np.ones(sd.num_cells)
+        vertical_load = self.params["vertical_load"]
+        initial_p = vertical_load * np.ones(sd.num_cells)
         data[pp.STATE][self.scalar_variable] = initial_p
         data[pp.STATE][pp.ITERATE][self.scalar_variable] = initial_p
-
-        # Store initial pressure and displacement solutions
-        self.sol[self._ee]["time"] = self.time_manager.time
-        self.sol[self._ee]["dimless_t"] = self.dimensionless_time(self.time_manager.time)
-        self.sol[self._ee]["p_num"] = initial_p
-        self.sol[self._ee]["p_ex"] = initial_p
-        self.sol[self._ee]["u_num"] = np.zeros(sd.dim * sd.num_cells)
-        self.sol[self._ee]["u_ex"] = np.zeros(sd.dim * sd.num_cells)
+        self._store_variables()
 
     def _bc_type_scalar(self, sd: pp.Grid) -> pp.BoundaryCondition:
         """Define boundary condition types for the flow subproblem.
@@ -78,10 +130,9 @@ class Terzaghi(pp.ContactMechanicsBiot):
             sd: Subdomain grid.
 
         Returns:
-            bc: Scalar boundary condition representation.
+            Scalar boundary condition representation.
 
         """
-
         # Define boundary regions
         all_bc, _, _, north, *_ = self._domain_boundary_sides(sd)
         north_bc = np.isin(all_bc, np.where(north)).nonzero()
@@ -104,7 +155,6 @@ class Terzaghi(pp.ContactMechanicsBiot):
             bc: Vectorial boundary condition representation.
 
         """
-
         # Inherit bc from parent class. This sets all bc faces as Dirichlet.
         super()._bc_type_mechanics(sd=sd)
 
@@ -146,7 +196,7 @@ class Terzaghi(pp.ContactMechanicsBiot):
         _, _, _, north, *_ = self._domain_boundary_sides(sd)
 
         # All zeros except vertical component of the north side
-        vertical_load = self.params["applied_load"]
+        vertical_load = self.params["vertical_load"]
         bc_values = np.array([np.zeros(sd.num_faces), np.zeros(sd.num_faces)])
         bc_values[1, north] = -vertical_load * sd.face_areas[north]
         bc_values = bc_values.ravel("F")
@@ -154,63 +204,51 @@ class Terzaghi(pp.ContactMechanicsBiot):
         return bc_values
 
     def after_newton_convergence(
-        self,
-        solution: np.ndarray,
-        errors: float,
-        iteration_counter: int,
+            self,
+            solution: np.ndarray,
+            errors: float,
+            iteration_counter: int,
     ) -> None:
         super().after_newton_convergence(solution, errors, iteration_counter)
 
         # Store solutions
-        sd = self.mdg.subdomains()[0]
-        data = self.mdg.subdomain_data(sd)
         schedule = self.time_manager.schedule
         if any([np.isclose(self.time_manager.time, t_sch) for t_sch in schedule]):
-            self._ee += 1  # increase exporter counter
-            self.sol[self._ee]["time"] = self.time_manager.time
-            self.sol[self._ee]["dimless_t"] = self.dimensionless_time(self.time_manager.time)
-            self.sol[self._ee]["u_num"] = data[pp.STATE][self.displacement_variable]
-            self.sol[self._ee]["p_num"] = data[pp.STATE][self.scalar_variable]
+            self._store_counter += 1  # increase exporter counter
+            self._store_variables()  # store variables in the sol dictionary
 
     def after_simulation(self) -> None:
-        """Postprocess and plot results"""
-        self.postprocess_results()
-        if self.params.get("plot_results", False):
+        """Method to be called after the simulation has finished."""
+        if self.params["plot_results"]:
             self.plot_results()
 
     # Physical parameters
     def _permeability(self, sd: pp.Grid) -> np.ndarray:
-        """Override value of intrinsic permeability [m^2].
+        """Override value of intrinsic permeability [m^2]
 
         Args:
             sd: Subdomain grid.
 
         Returns:
-            permeability (sd.num_cells): containing the permeability values at each cell.
+            Array containing the permeability values on each cell.
 
         """
-
-        permeability = self.params["permeability"] * np.ones(sd.num_cells)
-
-        return permeability
+        return self.params["permeability"] * np.ones(sd.num_cells)
 
     def _storativity(self, sd: pp.Grid) -> np.ndarray:
-        """Override value of storativity [Pa^{-1}].
+        """Override value of storativity [Pa^-1]
 
         Args:
             sd: Subdomain grid.
 
         Returns:
-            storativity (sd.num_cells): containing the storativity values at each cell.
+            Array containing the storativity values on each cell.
 
         """
-
-        storativity = np.zeros(sd.num_cells)
-
-        return storativity
+        return np.zeros(sd.num_cells)
 
     def _stiffness_tensor(self, sd: pp.Grid) -> pp.FourthOrderTensor:
-        """Override stifness tensor.
+        """Override stiffness tensor
 
         Args:
             sd: Subdomain grid.
@@ -224,13 +262,14 @@ class Terzaghi(pp.ContactMechanicsBiot):
         return pp.FourthOrderTensor(mu, lam)
 
     def _viscosity(self, sd: pp.Grid) -> np.ndarray:
-        """Override fluid viscosity values [Pa.s]
+        """Override fluid viscosity values [Pa * s]
 
         Args:
             sd: Subdomain grid.
 
         Returns:
-            Viscosity
+            Array containing the viscosity values on each cell.
+
         """
         return self.params["viscosity"] * np.ones(sd.num_cells)
 
@@ -241,51 +280,40 @@ class Terzaghi(pp.ContactMechanicsBiot):
             sd: Subdomain grid.
 
         Returns:
-            Biot's coefficient.
+            Array containing the Biot's coefficient on each cell.
+
         """
         return self.params["alpha_biot"] * np.ones(sd.num_cells)
 
     # Other physical parameters used specifically for Terzaghi's problem
-    def confined_compressibility(self) -> float:
-        """Confined compressibility [1/Pa].
+    def confined_compressibility(self) -> Union[int, float]:
+        """Confined compressibility [Pa^-1]"""
 
-        Returns:
-            m_v: confined compressibility.
-
-        """
         mu_s = self.params["mu_lame"]
         lambda_s = self.params["lambda_lame"]
         m_v = 1 / (2 * mu_s + lambda_s)
 
         return m_v
 
-    def consolidation_coefficient(self) -> float:
-        """Consolidation coefficient [m^2 * s^-1}]
-
-        Returns:
-            c_v: coefficient of consolidation.
-
-        """
+    def consolidation_coefficient(self) -> Union[int, float]:
+        """Consolidation coefficient [m^2 * s^-1]"""
 
         k = self.params["permeability"]  # [m^2]
-        rho_f = self.params["fluid_density"]  # [kg/m^3]
-        mu_f = self.params["viscosity"]  # [Pa.s]
-        g = pp.GRAVITY_ACCELERATION  # [m/s^2]
-        gamma_f = rho_f * g  # volumetric weight  [1/Pa]
-        K = (k * gamma_f) / mu_f  # hydraulic conductivity [m/s]
+        mu_f = self.params["viscosity"]  # [Pa * s]
+        gamma_f = self.params["specific_weight"]  # [Pa * m^-1]
+        hydraulic_conductivity = (k * gamma_f) / mu_f  # [m * s^-1]
 
-        S_eps = 0  # storativity [1/Pa]
+        storativity = 0  # [Pa^-1]
         alpha_biot = self.params["alpha_biot"]  # [-]
-        m_v = self.confined_compressibility()  # [1/Pa]
+        m_v = self.confined_compressibility()  # [Pa^-1]
 
-        c_v = K / (gamma_f * (S_eps + alpha_biot**2 * m_v))
+        c_v = hydraulic_conductivity / (gamma_f * (storativity + alpha_biot ** 2 * m_v))
 
         return c_v
 
     #  Analytical solution methods
-    def dimensionless_time(self, t: Union[float, int]) -> float:
-        """
-        Compute exact dimensionless time.
+    def nondim_time(self, t: Union[float, int]) -> float:
+        """Nondimensionalize time.
 
         Args:
             t: Time in seconds.
@@ -298,11 +326,10 @@ class Terzaghi(pp.ContactMechanicsBiot):
         h = self.params["height"]
         c_v = self.consolidation_coefficient()
 
-        return (t * c_v) / (h**2)
+        return (t * c_v) / (h ** 2)
 
     def exact_pressure(self, t: Union[float, int]) -> np.ndarray:
-        """
-        Compute exact pressure.
+        """Compute exact pressure.
 
         Args:
             t: Time in seconds.
@@ -315,45 +342,65 @@ class Terzaghi(pp.ContactMechanicsBiot):
         sd = self.mdg.subdomains()[0]
         yc = sd.cell_centers[1]
         h = self.params["height"]
-        F = self.params["applied_load"]
-        dimless_t = self.dimensionless_time(t)
+        vertical_load = self.params["vertical_load"]
+        dimless_t = self.nondim_time(t)
 
-        n = self.params.get("upper_summation_limit", 1000)
+        n = self.params["upper_limit_summation"]
 
         sum_series = np.zeros_like(yc)
         for i in range(1, n + 1):
             sum_series += (
-                (((-1) ** (i - 1)) / (2 * i - 1))
-                * np.cos((2 * i - 1) * (np.pi / 2) * (yc / h))
-                * np.exp((-((2 * i - 1) ** 2)) * (np.pi**2 / 4) * dimless_t)
+                    (((-1) ** (i - 1)) / (2 * i - 1))
+                    * np.cos((2 * i - 1) * (np.pi / 2) * (yc / h))
+                    * np.exp((-((2 * i - 1) ** 2)) * (np.pi ** 2 / 4) * dimless_t)
             )
-        p = (4 / np.pi) * F * sum_series
+        p = (4 / np.pi) * vertical_load * sum_series
 
         return p
 
     # -----------> Helper methods
-    def vertical_cut(self, array: np.ndarray) -> np.ndarray:
-        """Perform a vertical cut in the middle of the domain.
+    def _store_variables(self) -> None:
+        """Utility function to store variables of interest."""
 
-        Note:
-            This is done by obtaining the closest vertical cell-centers to the line
-            (h/2, 0) (h/2, h). This functionality is similar to the Plot Over Line
-            tool from ParaView.
+        # Useful data
+        sd: pp.Grid = self.mdg.subdomains()[0]
+        data: dict = self.mdg.subdomain_data(sd)
+        t: Union[float, int] = self.time_manager.time
+        p_var: str = self.scalar_variable
+        u_var: str = self.displacement_variable
+        p0: Union[float, int] = np.abs(self.params["vertical_load"])
+        yc: np.ndarray = sd.cell_centers[1]
+        height: Union[float, int] = self.params["height"]
 
-        """
-        sd = self.mdg.subdomains()[0]
-        h = self.params["height"]
-        half_max_diam = np.max(sd.cell_diameters()) / 2
-        yc = np.arange(0, h, half_max_diam)
-        closest_cells = sd.closest_cell(np.array([h / 2 * np.ones_like(yc), yc]))
-        _, idx = np.unique(closest_cells, return_index=True)
-        y_points = closest_cells[np.sort(idx)]
-        cut_array = array[y_points]
+        # Store solutions
+        self.sol[self._store_counter]["t"] = t
+        self.sol[self._store_counter]["t_nondim"] = self.nondim_time(t)
+        self.sol[self._store_counter]["yc"] = yc
+        self.sol[self._store_counter]["yc_nondim"] = yc / height
 
-        return cut_array
+        if t == 0:
+            self.sol[self._store_counter]["unum"] = np.zeros(sd.dim * sd.num_cells)
+            self.sol[self._store_counter]["pnum"] = p0
+            self.sol[self._store_counter]["pex"] = p0
+            self.sol[self._store_counter]["pnum_nondim"] = np.ones(sd.num_cells)
+            self.sol[self._store_counter]["pex_nondim"] = np.ones(sd.num_cells)
+        else:
+            self.sol[self._store_counter]["unum"] = data[pp.STATE][u_var]
+            self.sol[self._store_counter]["pnum"] = data[pp.STATE][p_var]
+            self.sol[self._store_counter]["pex"] = self.exact_pressure(t)
+            self.sol[self._store_counter]["pnum_nondim"] = data[pp.STATE][p_var] / p0
+            self.sol[self._store_counter]["pex_nondim"] = self.exact_pressure(t) / p0
+
+        self.sol[self._store_counter]["p_error"] = self.l2_relative_error(
+            sd,
+            self.sol[self._store_counter]["pex"],
+            self.sol[self._store_counter]["pnum"],
+            is_cc=True,
+            is_scalar=True,
+        )
 
     def displacement_trace(
-        self, displacement: np.ndarray, pressure: np.ndarray
+            self, displacement: np.ndarray, pressure: np.ndarray
     ) -> np.ndarray:
         """Project the displacement vector onto the faces.
 
@@ -391,54 +438,27 @@ class Terzaghi(pp.ContactMechanicsBiot):
 
         return trace_u
 
-    # Postprocessing methods
-    def postprocess_results(self) -> None:
-        """Postprocessing of results for plotting.
-
-        Note:
-            This method will create the following new fields, for all scheduled times,
-            in the `self.sol` dictionary: `dimless_x`, `dimlesss_y`, `dimless_p_ex`,
-            `dimless_p_num`, `dimless_ux_num`, `dimless_ux_ex`, `dimless_uy_num`,
-            and `dimless_uy_ex`.
-
-        """
-        sd = self.mdg.subdomains()[0]
-        F = self.params["applied_load"]
-        h = self.params["height"]
-        yc = sd.cell_centers[1]
-
-        for key in self.sol:
-
-            # Retrieve numerical and exact pressures
-            t = self.sol[key]["time"]
-            p_num = self.sol[key]["p_num"]
-            p_ex = self.exact_pressure(t)
-
-            # Store relevant quantities
-            self.sol[key]["dimless_yc"] = self.vertical_cut(yc / h)
-
-            self.sol[key]["dimless_p_num"] = self.vertical_cut(p_num / F)
-            self.sol[key]["dimless_p_ex"] = self.vertical_cut(p_ex / F)
-
     def plot_results(self):
         """Plot dimensionless pressure"""
 
         folder = "out/"
         fnamep = "pressure"
         extension = ".pdf"
-        cmap = mcolors.ListedColormap(plt.cm.tab20.colors[: len(self.time_manager.schedule)])
+        cmap = mcolors.ListedColormap(
+            plt.cm.tab20.colors[: len(self.time_manager.schedule)]
+        )
 
         # -----> Pressure plot
         fig, ax = plt.subplots(figsize=(9, 8))
         for key in self.sol:
             ax.plot(
-                self.sol[key]["dimless_p_ex"],
-                self.sol[key]["dimless_yc"],
+                self.sol[key]["pex_nondim"],
+                self.sol[key]["yc_nondim"],
                 color=cmap.colors[key],
             )
             ax.plot(
-                self.sol[key]["dimless_p_num"],
-                self.sol[key]["dimless_yc"],
+                self.sol[key]["pnum_nondim"],
+                self.sol[key]["yc_nondim"],
                 color=cmap.colors[key],
                 linewidth=0,
                 marker=".",
@@ -451,7 +471,7 @@ class Terzaghi(pp.ContactMechanicsBiot):
                 linewidth=0,
                 marker="s",
                 markersize=12,
-                label=rf"$\tau=${np.round(self.sol[key]['dimless_t'], 6)}",
+                label=rf"$\tau=${np.round(self.sol[key]['t_nondim'], 6)}",
             )
         ax.set_xlabel(r"$\tilde{p} = p/p_0$", fontsize=15)
         ax.set_ylabel(r"$\tilde{y} = y/h$", fontsize=15)
@@ -464,22 +484,47 @@ class Terzaghi(pp.ContactMechanicsBiot):
         plt.savefig(folder + fnamep + extension, bbox_inches="tight")
         plt.gcf().clear()
 
-        # # -----> Errors as a function of time
-        # error_p = np.asarray([self.sol[t]["error_pressure"] for t in self.tsc.schedule])
-        # error_u = np.asarray(
-        #     [self.sol[t]["error_displacement"] for t in self.tsc.schedule])
-        # error_Q = np.asarray([self.sol[t]["error_flux"] for t in self.tsc.schedule])
-        # error_T = np.asarray([self.sol[t]["error_traction"] for t in self.tsc.schedule])
-        # times = np.asarray(self.tsc.schedule)
-        #
-        # fig, ax = plt.subplots(figsize=(9, 8))
-        # ax.loglog(times, error_p, "o-", label="Pressure error")
-        # ax.loglog(times, error_u, "o-", label="Displacement error")
-        # ax.loglog(times, error_Q, "o-", label="Flux error")
-        # ax.loglog(times, error_T, "o-", label="Traction error")
-        # ax.legend(fontsize=13)
-        # ax.set_xlabel("Time [s]", fontsize=15)
-        # ax.set_ylabel("Discrete L2-error [-]", fontsize=15)
-        # ax.set_title("L2-errors as a function of time", fontsize=16)
-        # ax.grid()
-        # plt.show()
+    # -----> Error-related functions
+    @staticmethod
+    def l2_relative_error(
+            sd: pp.Grid,
+            true_val: np.ndarray,
+            approx_val: np.ndarray,
+            is_cc: bool,
+            is_scalar: bool,
+    ) -> float:
+        """Compute the error measured in the discrete (relative) L2-norm.
+
+        The employed norms correspond respectively to equations (75) and (76) for the
+        displacement and pressure from https://epubs.siam.org/doi/pdf/10.1137/15M1014280.
+
+        Args:
+            sd: PorePy grid.
+            true_val: Exact array, e.g.: pressure, displacement, flux, or traction.
+            approx_val: Approximated array, e.g.: pressure, displacement, flux, or traction.
+            is_cc: True for cell-centered quantities (e.g., pressure and displacement)
+                and False for face-centered quantities (e.g., flux and traction).
+            is_scalar: True for scalar quantities (e.g., pressure or flux) and False for
+                vector quantities (displacement and traction).
+
+        Returns:
+            l2_error: discrete L2-error of the quantity of interest.
+
+        """
+
+        if is_cc:
+            if is_scalar:
+                meas = sd.cell_volumes
+            else:
+                meas = sd.cell_volumes.repeat(sd.dim)
+        else:
+            if is_scalar:
+                meas = sd.cell_faces
+            else:
+                meas = sd.cell_faces.repat(sd.dim)
+
+        numerator = np.sqrt(np.sum(meas * np.abs(true_val - approx_val) ** 2))
+        denominator = np.sqrt(np.sum(meas * np.abs(true_val) ** 2))
+        l2_error = numerator / denominator
+
+        return l2_error
