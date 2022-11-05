@@ -222,7 +222,7 @@ class Terzaghi(pp.ContactMechanicsBiot):
         if self.params["plot_results"]:
             self.plot_results()
 
-    # Physical parameters
+    # -----> Physical parameters
     def _permeability(self, sd: pp.Grid) -> np.ndarray:
         """Override value of intrinsic permeability [m^2]
 
@@ -285,7 +285,6 @@ class Terzaghi(pp.ContactMechanicsBiot):
         """
         return self.params["alpha_biot"] * np.ones(sd.num_cells)
 
-    # Other physical parameters used specifically for Terzaghi's problem
     def confined_compressibility(self) -> Union[int, float]:
         """Confined compressibility [Pa^-1]"""
 
@@ -311,7 +310,7 @@ class Terzaghi(pp.ContactMechanicsBiot):
 
         return c_v
 
-    #  Analytical solution methods
+    # -----> Analytical expressions
     def nondim_time(self, t: Union[float, int]) -> float:
         """Nondimensionalize time.
 
@@ -358,7 +357,7 @@ class Terzaghi(pp.ContactMechanicsBiot):
 
         return p
 
-    # -----------> Helper methods
+    # -----> Helper methods
     def _store_variables(self) -> None:
         """Utility function to store variables of interest."""
 
@@ -484,7 +483,6 @@ class Terzaghi(pp.ContactMechanicsBiot):
         plt.savefig(folder + fnamep + extension, bbox_inches="tight")
         plt.gcf().clear()
 
-    # -----> Error-related functions
     @staticmethod
     def l2_relative_error(
             sd: pp.Grid,
