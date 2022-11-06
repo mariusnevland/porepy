@@ -1,3 +1,33 @@
+"""
+This module contains an implementation of Mandel's problem of poroelasticity. The problem is
+discretized using MPFA/MPSA-FV in space and backward Euler in time.
+
+For futher details on Mandel's problem, see [1], [2], [3], [4]. For the implementational
+details, see [5].
+
+Note:
+
+    Bibliographic references:
+
+    - [1] Mandel, J.: Consolidation des sols (étude mathématique). Geotechnique.3(7),
+      287–299 (1953).
+
+    - [2] Cheng, A.H.-D., Detournay, E.: A direct boundary element method for plane strain
+      poroelasticity. Int. J. Numer. Anal. Methods Geomech. 12(5), 551–572 (1988).
+
+    - [3] Abousleiman, Y., Cheng, A. D., Cui, L., Detournay, E., & Roegiers, J. C. (1996).
+      Mandel's problem revisited. Geotechnique, 46(2), 187-195.
+
+    - [4] Mikelić, A., Wang, B., & Wheeler, M. F. (2014). Numerical convergence study of
+      iterative coupling for coupled flow and geomechanics. Computational Geosciences,
+      18(3), 325-341.
+
+    - [5] Keilegavlen, E., Berge, R., Fumagalli, A. et al. PorePy: an open-source software for
+      simulation of multiphysics processes in fractured porous media. Comput Geosci 25,
+      243–265 (2021).
+
+"""
+
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
