@@ -36,12 +36,11 @@ class StoreSolution:
 
         # Pressure variables
         self.numerical_pressure = data[pp.STATE][p_var]
-        self.exact_pressure = model.eval_scalar(sd, exact.p, t)
+        self.exact_pressure = model.eval_scalar(sd, exact.p, t, is_cc=True)
 
         # Displacement variables
         self.numerical_displacement = data[pp.STATE][u_var]
-        self.exact_displacement = model.eval_vector(sd, exact.u, t)
-
+        self.exact_displacement = model.eval_vector(sd, exact.u, t, is_cc=True)
 
 @dataclass
 class ExactSolution:
@@ -225,6 +224,52 @@ class BiotWithRollers(pp.ContactMechanicsBiot):
         else:
             raise ValueError("Unsupported mesh type.")
 
+    def _bc_type_mechanics(self, sd: pp.Grid) -> pp.BoundaryConditionVectorial:
+        super()._bc_type_mechanics(sd)
+
+        # Get boundary sides, retrieve data dict, and bc object
+        _, east, west, north, south, *_ = self._domain_boundary_sides(sd)
+        data = self.mdg.subdomain_data(sd)
+        bc = data[pp.PARAMETERS][self.mechanics_parameter_key]["bc"]
+
+        # East side: Roller
+        bc.is_neu[1, east] = True
+        bc.is_dir[1, east] = False
+
+        # West side: Roller
+        bc.is_neu[1, west] = True
+        bc.is_dir[1, west] = False
+
+        # South side: Roller
+        bc.is_neu[0, south] = True
+        bc.is_dir[0, south] = False
+
+        return bc
+
+    # def _bc_values_mechanics(self, sd: pp.Grid) -> np.ndarray:
+    #     """Set boundary condition values for the mechanics subproblem.
+    #
+    #     Args:
+    #         sd: Subdomain grid.
+    #
+    #     Returns:
+    #         Vectorial boundary condition values of shape (sd.dim * sd.num_faces, ).
+    #
+    #     """
+    #     super()._bc_values_mechanics(sd)
+    #
+    #     # # Retrieve boundary sides
+    #     # _, _, _, north, *_ = self._domain_boundary_sides(sd)
+    #     #
+    #     # # All zeros except vertical component of the north side
+    #     # vertical_load = self.params["vertical_load"]
+    #     # bc_values = np.array([np.zeros(sd.num_faces), np.zeros(sd.num_faces)])
+    #     # bc_values[1, north] = -vertical_load * sd.face_areas[north]
+    #     # bc_values = bc_values.ravel("F")
+    #
+    #     #return bc_values
+
+
     def before_newton_loop(self) -> None:
         """Method to be called before entering the newton loop"""
         super().before_newton_loop()
@@ -239,14 +284,14 @@ class BiotWithRollers(pp.ContactMechanicsBiot):
 
         # Update flow source term
         f_flow_sym = exact.f_flow
-        f_flow_cc = self.eval_scalar(sd, f_flow_sym, time)
+        f_flow_cc = self.eval_scalar(sd, f_flow_sym, time, is_cc=True)
         integrated_f_flow = f_flow_cc * sd.cell_volumes * dt
         # we have to explicitly multiply by dt to be in agreement with the discretization
         data[pp.PARAMETERS][self.scalar_parameter_key]["source"] = integrated_f_flow
 
         # Update mechanics source term
         f_mech_sym = exact.f_mech
-        f_mech_cc = np.asarray(self.eval_vector(sd, f_mech_sym, time)).ravel("F")
+        f_mech_cc = np.asarray(self.eval_vector(sd, f_mech_sym, time, is_cc=True)).ravel("F")
         integrated_f_mech = f_mech_cc * sd.cell_volumes.repeat(sd.dim)
         data[pp.PARAMETERS][self.mechanics_parameter_key]["source"] = integrated_f_mech
 
@@ -264,7 +309,10 @@ class BiotWithRollers(pp.ContactMechanicsBiot):
     # -----> Helper methods
     @staticmethod
     def eval_scalar(
-        sd: pp.Grid, sym_exp: object, time: Union[int, float]
+        sd: pp.Grid,
+        sym_exp: object,
+        time: Union[int, float],
+        is_cc: bool
     ) -> np.ndarray:
         """
         Evaluate a symbolic scalar expression at the cell centers for a given time.
@@ -273,11 +321,18 @@ class BiotWithRollers(pp.ContactMechanicsBiot):
             sd: PorePy grid.
             sym_exp: Symbolic expression dependent on x, y, and t.
             time: Time in seconds.
+            is_cc: True for a cell-center quantity. False for a face-center quantity.
 
         Returns:
-            Evaluated expression at the cell centers. Shape is (sd.num_cells, ).
+            Evaluated expression either at the cell centers or at the face centers.
 
         """
+
+        if is_cc:
+            s = sd.cell_centers
+        else:
+            s = sd.face_centers
+
         # Symbolic variables
         x, y, t = sym.symbols("x y t")
 
@@ -285,13 +340,13 @@ class BiotWithRollers(pp.ContactMechanicsBiot):
         fun = sym.lambdify((x, y, t), sym_exp, "numpy")
 
         # Evaluate at the cell centers
-        eval_exp = fun(sd.cell_centers[0], sd.cell_centers[1], time)
+        eval_exp = fun(s[0], s[1], time)
 
         return eval_exp
 
     @staticmethod
     def eval_vector(
-        sd: pp.Grid, sym_exp: list[object], time: Union[int, float]
+        sd: pp.Grid, sym_exp: list[object], time: Union[int, float], is_cc: bool
     ) -> list[np.ndarray]:
         """
         Evaluate a symbolic scalar expression at the cell centers for a given time.
@@ -300,12 +355,17 @@ class BiotWithRollers(pp.ContactMechanicsBiot):
             sd: PorePy grid.
             sym_exp: Symbolic expression dependent on x, y, and t.
             time: Time in seconds.
+            is_cc: True for a cell-center quantity. False for a face-center quantity.
 
         Returns:
-            Evaluated expression at the cell centers. The output is a list of 2 numpy
-            arrays, each one of shape (sd.num.cells, ).
+            Evaluated expression either at the cell centers or at the face centers.
 
         """
+        if is_cc:
+            s = sd.cell_centers
+        else:
+            s = sd.face_centers
+
         # Symbolic variables
         x, y, t = sym.symbols("x y t")
 
@@ -314,15 +374,15 @@ class BiotWithRollers(pp.ContactMechanicsBiot):
         fun_y = sym.lambdify((x, y, t), sym_exp[1], "numpy")
 
         # Evaluate at the cell centers
-        eval_exp_x = fun_x(sd.cell_centers[0], sd.cell_centers[1], time)
-        eval_exp_y = fun_y(sd.cell_centers[0], sd.cell_centers[1], time)
+        eval_exp_x = fun_x(s[0], s[1], time)
+        eval_exp_y = fun_y(s[0], s[1], time)
         eval_exp = [eval_exp_x, eval_exp_y]
 
         return eval_exp
 
     @staticmethod
     def eval_tensor(
-        sd: pp.Grid, sym_exp: list[list[object]], time: Union[int, float]
+        sd: pp.Grid, sym_exp: list[list[object]], time: Union[int, float], is_cc: bool
     ) -> list[list[np.ndarray]]:
         """
         Evaluate a symbolic tensor expression at the cell centers for a given time.
@@ -331,13 +391,19 @@ class BiotWithRollers(pp.ContactMechanicsBiot):
             sd: PorePy grid.
             sym_exp: Symbolic expression dependent on x, y, and t.
             time: Time in seconds.
+            is_cc: True for a cell-center quantity. False for a face-center quantity.
+
 
         Returns:
-            Evaluated expression at the cell centers. The output is a list of 2
-                lists, each inner list contains 2 numpy arrays, each array of shape
-                (sd.num.cells, ).
+            Evaluated expression either at the cell centers or at the face centers.
+
 
         """
+
+        if is_cc:
+            s = sd.cell_centers
+        else:
+            s = sd.face_centers
 
         # Symbolic variables
         x, y, t = sym.symbols("x y t")
@@ -349,14 +415,30 @@ class BiotWithRollers(pp.ContactMechanicsBiot):
         fun_yy = sym.lambdify((x, y, t), sym_exp[1][1], "numpy")
 
         # Evaluate at the cell centers
-        eval_exp_xx = fun_xx(sd.cell_centers[0], sd.cell_centers[1], time)
-        eval_exp_xy = fun_xy(sd.cell_centers[0], sd.cell_centers[1], time)
-        eval_exp_yx = fun_yx(sd.cell_centers[0], sd.cell_centers[1], time)
-        eval_exp_yy = fun_yy(sd.cell_centers[0], sd.cell_centers[1], time)
+        eval_exp_xx = fun_xx(s[0], s[1], time)
+        eval_exp_xy = fun_xy(s[0], s[1], time)
+        eval_exp_yx = fun_yx(s[0], s[1], time)
+        eval_exp_yy = fun_yy(s[0], s[1], time)
         eval_exp = [[eval_exp_xx, eval_exp_xy], [eval_exp_yx, eval_exp_yy]]
 
         return eval_exp
 
+    def exact_traction(self):
+        sd = self.mdg.subdomains()[0]
+        normals = sd.face_normals
+        nx = normals[0]
+        ny = normals[1]
+
+        exact = ExactSolution(self)
+        sigma_tot = exact.sigma_tot
+        sigma_fc = self.eval_tensor(sd, sigma_tot, self.time_manager.time, False)
+
+        T_x = sigma_fc[0][0] * nx + sigma_fc[0][1] * ny
+        T_y = sigma_fc[1][0] * nx + sigma_fc[1][1] * ny
+
+        T = np.asarray([T_x, T_y]).ravel("F")
+
+        return T
 
 #%% Runner
 params = {
@@ -385,10 +467,13 @@ sd = model.mdg.subdomains()[0]
 data = model.mdg.subdomain_data(sd)
 p_var = model.scalar_variable
 u_var = model.displacement_variable
-exact = ExactSolution(model)
-t = model.time_manager.time
-p_ex = model.eval_scalar(sd, exact.p, t)
-p_num = data[pp.STATE][p_var]
+p_ex = model.solutions[0].exact_pressure
+p_num = model.solutions[0].numerical_pressure
 
 pp.plot_grid(sd, p_ex, plot_2d=True, title="Exact pressure")
 pp.plot_grid(sd, p_num, plot_2d=True, title="Numerical pressure")
+
+# %% Experimental
+exact = ExactSolution(model)
+model.eval_tensor(sd, exact.sigma_tot, model.time_manager.time, False)
+
