@@ -7,7 +7,7 @@ details, see [5].
 
 Note:
 
-    Bibliographic references:
+    References:
 
     - [1] Mandel, J.: Consolidation des sols (étude mathématique). Geotechnique.3(7),
       287–299 (1953).
@@ -85,36 +85,92 @@ class Mandel(pp.ContactMechanicsBiot):
     """
 
     def __init__(self, params: dict):
-        """Constructor for the Mandel model class.
+        """Constructor of the Mandel class.
 
         Args:
             params: Dictionary containing mandatory and optional model parameters.
 
-        Mandatory model parameters:
-            use_ad (bool): Whether to use AD or not. This model was developed only for the
-                case when use_ad=True since eventually this will be the default in PorePy.
-            mu_lame (float): First Lamé parameter [Pa].
-            lambda_lame (float): Seconda Lamé parameter [Pa].
-            permeability (float): Intrinsic permeability [m^2].
-            alpha_biot (float): Biot-Willis coefficient [-].
-            viscosity (float): Fluid dynamic viscosity [Pa s].
-            storativity (float): Storativity or specific storage [1/Pa].
-            applied_load (float): Vertically applied load [N/m].
-            height (float): Height of the domain [m].
-            width (float): Width of the domain [m].
-            mesh_size (float): Target mesh size (the one passed to gmsh) [m].
-            time_manager (pp.TimeManager): Time manager object, properly instantiated.
+            Default physical parameters were adapted from
+            https://link.springer.com/article/10.1007/s10596-013-9393-8.
 
-        Optional model parameters:
-            number_of_roots (int, Defaults to 200): Number of roots used to approximate the
-                exact solutions.
-            plot_results (bool, Defaults to False): Whether to plot the results or not.
+            Optional parameters are:
 
+            - 'alpha_biot' : Biot constant (int or float). Default is 1.0.
+            - 'domain_size' : Size of the domain (tuple of int or float). The first element
+              of the tuple is the width and the second the height. Default is (100.0, 10.0).
+            - 'lambda_lame' : Lamé parameter in `Pa` (int or float). Default is 1.65e9.
+            - 'mesh_size' : Mesh size in `m` (int or float). Used only when
+              `mesh_size = "triangular"`. Default is 2.0.
+            - 'mesh_type' : Type of mesh (str). Either "cartesian" or "triangular". The
+              first is a perturbed Cartesian grid and the second an unstructured triangular
+              mesh. Default is "cartesian".
+            - 'mu_lame' : Lamé parameter in `m` (int or float). Default is 1.475E9.
+            - 'number_of_roots' : Number of roots to approximate the exact solutions (int).
+              Default is 200.
+            - 'num_cells' : Number of cells in horizontal and vertical directions
+              (tuple of int). This parameter is used only when `mesh_type = "cartesian"`.
+              Default is (50, 5).
+            - 'permeability' : Permeability in `m^2` (int or float). Default is 9.86e-14.
+            - 'pertubation_factor' : Perturbation factor (int or float). Used for
+              perturbing the physical nodes of the mesh. This is necessary to avoid
+              singular matrices with MPSA and the use of rollers on Cartesian grids.
+              Default is 1e-6.
+            - 'plot_results' : Whether to plot the results (bool). The resulting plot is
+              saved inside the `out` folder. Default is False.
+            - 'storativity' : Storativity in `Pa^-1` (int or float). Default is 6.0606e-11.
+            - 'time_manager' : Time manager object (pp.TimeManager). Default is
+              pp.TimeManager([0, 20, 100, 400, 1200, 3000], 10, constant_dt=True).
+            - 'use_ad' : Whether to use ad (bool). Must be set to True. Otherwise,
+              an error will be raised. Default is True.
+            - 'vertical_load' : Applied vertical load in `N * m^-1` (int or float).
+              Default is 6e8.
+            - 'viscosity' : Fluid viscosity in `Pa * s` (int or float). Default is 1e-3.
         """
-        super().__init__(params)
+        def set_default_params(keyword: str, value: object) -> None:
+            """
+            Set default parameters if a keyword is absent in the `params` dictionary.
 
-        # Create a solution dictionary to store pressure and displacement solutions
-        self.sol = {t: {} for t in self.time_manager.schedule}
+            Args:
+                keyword: Parameter keyword, e.g., "alpha_biot".
+                value: Value of `keyword`, e.g., 1.0.
+
+            """
+            if keyword not in params.keys():
+                params[keyword] = value
+
+            # Default parameters
+            default_tm = pp.TimeManager([0, 20, 100, 400, 1200, 3000], 10, constant_dt=True)
+            default_params: list[tuple] = [
+                ("alpha_biot", 1.0),  # [-]
+                ("domain_size", (10.0, 100.0)),  # [m]
+                ("height", 1.0),  # [m]
+                ("lambda_lame", 1.65e9),  # [Pa]
+                ("mesh_type", "cartesian"),
+                ("mesh_size", 2.0),  # [m]
+                ("mu_lame", 1.475e9),  # [Pa]
+                ("number_of_roots", 200),
+                ("num_cells", (50, 5)),
+                ("permeability", 9.86e-14),  # [m^2]
+                ("perturbation_factor", 1e-6),
+                ("plot_results", False),
+                ("specific_weight", 9.943e3),  # [Pa * m^-1]
+                ("time_manager", default_tm),  # all time-related variables must be in [s]
+                ("use_ad", True),  # only `use_ad = True` is supported
+                ("vertical_load", 6e8),  # [N * m^-1]
+                ("viscosity", 1e-3),  # [Pa * s]
+            ]
+
+            # Set default values
+            for key, val in default_params:
+                set_default_params(key, val)
+            super().__init__(params)
+
+            # ad sanity check
+            if not self.params["use_ad"]:
+                raise ValueError("Model only valid when ad is used.")
+
+            # Create a solution list to store variables
+            self.solutions: list[TerzaghiSolution] = []
 
     def create_grid(self) -> None:
         """Create a two-dimensional Cartesian grid."""
