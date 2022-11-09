@@ -9,8 +9,8 @@ Note:
 
     References:
 
-    - [1] Mandel, J.: Consolidation des sols (étude mathématique). Geotechnique.3(7),
-      287–299 (1953).
+    - [1] Mandel, J.: Consolidation des sols (étude mathématique). Geotechnique.
+      3(7), 287–299 (1953).
 
     - [2] Cheng, A.H.-D., Detournay, E.: A direct boundary element method for plane strain
       poroelasticity. Int. J. Numer. Anal. Methods Geomech. 12(5), 551–572 (1988).
@@ -27,6 +27,8 @@ Note:
       243–265 (2021).
 
 """
+from __future__ import annotations
+
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -35,8 +37,71 @@ import porepy as pp
 import os
 import scipy.optimize as opt
 
-
 from typing import Literal, Union
+from dataclasses import dataclass
+
+
+@dataclass
+class StoreSolution:
+    """Data class to store variables of interest for Mandel's problem"""
+
+    def __init__(self, app: "Mandel"):
+        """Data class constructor.
+
+        Args:
+            app : Mandel's model application.
+
+        """
+        sd = app.mdg.subdomains()[0]
+        data = app.mdg.subdomain_data(sd)
+        p_var = app.scalar_variable
+        u_var = app.displacement_variable
+        t = app.time_manager.time
+
+        # Time variables
+        self.time = t
+
+        # Flow variables
+        self.numerical_pressure = data[pp.STATE][p_var]
+        self.exact_pressure = None
+        self.numerical_flux = None
+        self.exact_flux = None
+
+        # Mechanics variables
+        self.numerical_displacement = data[pp.STATE][u_var]
+        self.exact_displacement = None
+        self.numerical_traction = None
+        self.exact_traction = None
+
+        # Error variables
+        self.pressure_error = app.l2_relative_error(
+            sd=sd,
+            true_array=self.exact_pressure,
+            approx_array=self.numerical_pressure,
+            is_scalar=True,
+            is_cc=True
+        )
+        self.flux_error = app.l2_relative_error(
+            sd=sd,
+            true_array=self.exact_flux,
+            approx_array=self.numerical_flux,
+            is_scalar=True,
+            is_cc=False,
+        )
+        self.displacement_error = app.l2_relative_error(
+            sd=sd,
+            true_array=self.exact_displacement,
+            approx_array=self.numerical_displacement,
+            is_scalar=False,
+            is_cc=True,
+        )
+        self.traction_error = app.l2_relative_error(
+            sd=sd,
+            true_array=self.exact_traction,
+            approx_array=self.numerical_traction,
+            is_scalar=False,
+            is_cc=False,
+        )
 
 
 class Mandel(pp.ContactMechanicsBiot):
@@ -125,6 +190,7 @@ class Mandel(pp.ContactMechanicsBiot):
             - 'vertical_load' : Applied vertical load in `N * m^-1` (int or float).
               Default is 6e8.
             - 'viscosity' : Fluid viscosity in `Pa * s` (int or float). Default is 1e-3.
+
         """
         def set_default_params(keyword: str, value: object) -> None:
             """
@@ -138,50 +204,43 @@ class Mandel(pp.ContactMechanicsBiot):
             if keyword not in params.keys():
                 params[keyword] = value
 
-            # Default parameters
-            default_tm = pp.TimeManager([0, 20, 100, 400, 1200, 3000], 10, constant_dt=True)
-            default_params: list[tuple] = [
-                ("alpha_biot", 1.0),  # [-]
-                ("domain_size", (10.0, 100.0)),  # [m]
-                ("height", 1.0),  # [m]
-                ("lambda_lame", 1.65e9),  # [Pa]
-                ("mesh_type", "cartesian"),
-                ("mesh_size", 2.0),  # [m]
-                ("mu_lame", 1.475e9),  # [Pa]
-                ("number_of_roots", 200),
-                ("num_cells", (50, 5)),
-                ("permeability", 9.86e-14),  # [m^2]
-                ("perturbation_factor", 1e-6),
-                ("plot_results", False),
-                ("specific_weight", 9.943e3),  # [Pa * m^-1]
-                ("time_manager", default_tm),  # all time-related variables must be in [s]
-                ("use_ad", True),  # only `use_ad = True` is supported
-                ("vertical_load", 6e8),  # [N * m^-1]
-                ("viscosity", 1e-3),  # [Pa * s]
-            ]
+        # Default parameters
+        default_tm = pp.TimeManager([0, 20, 100, 400, 1200, 3000], 10, constant_dt=True)
+        default_params: list[tuple] = [
+            ("alpha_biot", 1.0),  # [-]
+            ("domain_size", (10.0, 100.0)),  # [m]
+            ("height", 1.0),  # [m]
+            ("lambda_lame", 1.65e9),  # [Pa]
+            ("mesh_type", "cartesian"),
+            ("mesh_size", 2.0),  # [m]
+            ("mu_lame", 1.475e9),  # [Pa]
+            ("number_of_roots", 200),
+            ("num_cells", (50, 5)),
+            ("permeability", 9.86e-14),  # [m^2]
+            ("perturbation_factor", 1e-6),
+            ("plot_results", False),
+            ("specific_weight", 9.943e3),  # [Pa * m^-1]
+            ("time_manager", default_tm),  # all time-related variables must be in [s]
+            ("use_ad", True),  # only `use_ad = True` is supported
+            ("vertical_load", 6e8),  # [N * m^-1]
+            ("viscosity", 1e-3),  # [Pa * s]
+        ]
 
-            # Set default values
-            for key, val in default_params:
-                set_default_params(key, val)
-            super().__init__(params)
+        # Set default values
+        for key, val in default_params:
+            set_default_params(key, val)
+        super().__init__(params)
 
-            # ad sanity check
-            if not self.params["use_ad"]:
-                raise ValueError("Model only valid when ad is used.")
+        # ad sanity check
+        if not self.params["use_ad"]:
+            raise ValueError("Model only valid when ad is used.")
 
-            # Create a solution list to store variables
-            self.solutions: list[TerzaghiSolution] = []
+        # Create a solution list to store variables
+        self.solutions: list[StoreSolution] = []
 
     def create_grid(self) -> None:
         """Create a two-dimensional Cartesian grid."""
-        if self.params["mesh_type"] == "triangular":
-            lx, ly = self.params["domain_size"]
-            mesh_size = self.params["mesh_size"]
-            self.box = {"xmin": 0.0, "xmax": lx, "ymin": 0.0, "ymax": ly}
-            network_2d = pp.FractureNetwork2d(None, None, self.box)
-            mesh_args = {"mesh_size_bound": mesh_size, "mesh_size_frac": mesh_size}
-            self.mdg = network_2d.mesh(mesh_args)
-        elif self.params["mesh_type"] == "cartesian":
+        if self.params["mesh_type"] == "cartesian":
             nx, ny = self.params["num_cells"]
             lx, ly = self.params["domain_size"]
             phys_dims = np.array([lx, ly])
@@ -189,7 +248,7 @@ class Mandel(pp.ContactMechanicsBiot):
             self.box = pp.geometry.bounding_box.from_points(np.array([[0, 0], phys_dims]).T)
             sd: pp.Grid = pp.CartGrid(n_cells, phys_dims)
             sd.compute_geometry()
-            np.random.seed(35)  # this seed is fixed but completely arbitrary
+            np.random.seed(43)  # this seed is fixed but completely arbitrary
             # Perturb nodes to avoid singular matrices with rollers and MPSA.
             perturbation_factor = self.params["perturbation_factor"]
             perturbation = np.random.rand(sd.num_nodes) * perturbation_factor
@@ -197,6 +256,15 @@ class Mandel(pp.ContactMechanicsBiot):
             sd.nodes[1] += perturbation
             sd.compute_geometry()
             self.mdg = pp.meshing.subdomains_to_mdg([[sd]])
+        elif self.params["mesh_type"] == "triangular":
+            lx, ly = self.params["domain_size"]
+            mesh_size = self.params["mesh_size"]
+            self.box = {"xmin": 0.0, "xmax": lx, "ymin": 0.0, "ymax": ly}
+            network_2d = pp.FractureNetwork2d(None, None, self.box)
+            mesh_args = {"mesh_size_bound": mesh_size, "mesh_size_frac": mesh_size}
+            self.mdg = network_2d.mesh(mesh_args)
+        else:
+            raise NotImplementedError("Mesh type not supported.")
 
     def _initial_condition(self) -> None:
         """Set up initial conditions.
@@ -247,7 +315,8 @@ class Mandel(pp.ContactMechanicsBiot):
         """
 
         # Define boundary regions
-        all_bc, east, *_ = self._domain_boundary_sides(sd)
+        tol = self.params["perturbation_factor"] * 10
+        all_bc, east, *_ = self._domain_boundary_sides(sd, tol=tol)
         east_bc = np.isin(all_bc, np.where(east)).nonzero()
 
         # All sides Neumann, except the East side which is Dirichlet
@@ -273,7 +342,8 @@ class Mandel(pp.ContactMechanicsBiot):
         super()._bc_type_mechanics(sd=sd)
 
         # Get boundary sides, retrieve data dict, and bc object
-        _, east, west, north, south, *_ = self._domain_boundary_sides(sd)
+        tol = self.params["perturbation_factor"] * 10
+        _, east, west, north, south, *_ = self._domain_boundary_sides(sd, tol=tol)
         data = self.mdg.subdomain_data(sd)
         bc = data[pp.PARAMETERS][self.mechanics_parameter_key]["bc"]
 
@@ -307,7 +377,8 @@ class Mandel(pp.ContactMechanicsBiot):
         """
 
         # Retrieve boundary sides
-        _, _, _, north, *_ = self._domain_boundary_sides(sd)
+        tol = self.params["perturbation_factor"] * 10
+        _, _, _, north, *_ = self._domain_boundary_sides(sd, tol=tol)
 
         # All zeros except vertical component of the north side
         sd = self.mdg.subdomains()[0]
@@ -1183,8 +1254,8 @@ time_manager = pp.TimeManager(
     dt_init=1,  # [s]
     constant_dt=True
 )
-# Create model's parameter dictionary
-model_params = {
+# Create application's parameter dictionary
+app_params = {
     "use_ad": True,
     "mu_lame": 2.475e9,  # [Pa]
     "lambda_lame": 1.650e9,  # [Pa]
@@ -1202,13 +1273,13 @@ model_params = {
     "mesh_size": 2.0,  # [m]
 }
 # Run model
-model = Mandel(model_params)
-pp.run_time_dependent_model(model, model_params)
+app = Mandel(app_params)
+pp.run_time_dependent_model(app, app_params)
 
 #%% Plotting
-sd = model.mdg.subdomains()[0]
-data = model.mdg.subdomain_data(sd)
-p_num = data[pp.STATE][model.scalar_variable]
-p_ex = model.exact_pressure(model.time_manager.time)
+sd = app.mdg.subdomains()[0]
+data = app.mdg.subdomain_data(sd)
+p_num = data[pp.STATE][app.scalar_variable]
+p_ex = app.exact_pressure(app.time_manager.time)
 pp.plot_grid(sd, p_num, plot_2d=True, title="Numerical pressure")
 pp.plot_grid(sd, p_ex, plot_2d=True, title="Exact pressure")
