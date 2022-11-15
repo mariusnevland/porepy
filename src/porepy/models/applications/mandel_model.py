@@ -90,7 +90,9 @@ class MandelSolution:
 
         # Traction variables
         self.num_traction = setup.numerical_traction()
-        self.ex_traction = setup.ravel(setup.stress_to_traction(setup.exact_stress(xf, t)))
+        self.ex_traction = setup.ravel(
+            setup.stress_to_traction(setup.exact_stress(xf, t))
+        )
 
         # Error variables
         self.pressure_error = setup.l2_relative_error(
@@ -287,11 +289,12 @@ class Mandel(pp.ContactMechanicsBiot):
         data[pp.STATE][pp.ITERATE][self.scalar_variable] = self.exact_pressure(xc, 0)
 
         # Set initial displacement
-        data[pp.STATE][self.displacement_variable] = self.ravel(self.exact_displacement(xc,
-                                                                                      yc, 0))
-        data[pp.STATE][pp.ITERATE][
-            self.displacement_variable
-        ] = self.ravel(self.exact_displacement(xc, yc, 0))
+        data[pp.STATE][self.displacement_variable] = self.ravel(
+            self.exact_displacement(xc, yc, 0)
+        )
+        data[pp.STATE][pp.ITERATE][self.displacement_variable] = self.ravel(
+            self.exact_displacement(xc, yc, 0)
+        )
 
         # Store initial solution
         self.solutions.append(MandelSolution(self))
@@ -689,9 +692,6 @@ class Mandel(pp.ContactMechanicsBiot):
             p (sd.num_cells, ): Exact pressure solution.
 
         """
-
-        sd = self.mdg.subdomains()[0]
-
         # Retrieve data
         F = self.params["applied_load"]
         B = self.skempton_coefficient()
@@ -703,7 +703,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         # Compute exact pressure
         if t == 0.0:  # initial condition has its own expression
-            p = ((F * B * (1 + nu_u)) / (3 * a)) * np.ones(sd.num_cells)
+            p = ((F * B * (1 + nu_u)) / (3 * a)) * np.ones_like(x)
         else:
             # Retrieve approximated roots
             aa_n = self.approximate_roots()[:, np.newaxis]
@@ -719,11 +719,9 @@ class Mandel(pp.ContactMechanicsBiot):
 
         return p
 
-    def exact_displacement(self,
-            x: np.ndarray,
-            y: np.ndarray,
-            t: Union[float, str]
-        ) -> list[np.ndarray, np.ndarray]:
+    def exact_displacement(
+        self, x: np.ndarray, y: np.ndarray, t: Union[float, str]
+    ) -> list[np.ndarray, np.ndarray]:
         """
         Exact horizontal and vertical displacement for a given time ``t``.
 
@@ -792,25 +790,21 @@ class Mandel(pp.ContactMechanicsBiot):
         return u
 
     def exact_velocity(
-            self,
-            x: np.ndarray,
-            t: Union[float, int]
+        self, x: np.ndarray, t: Union[float, int]
     ) -> list[np.ndarray, np.ndarray]:
         """Exact Darcy's velocity (specific discharge) in `m * s^{-1}`.
 
         For Mandel's problem, only the horizontal component in non-zero.
 
         Args:
-            x: Points in the horizontal axis in meters.
-            t: Time in seconds.
+            x: Points in the horizontal axis in `m`.
+            t: Time in `s`.
 
         Returns:
             List of exact velocities for the given time ``t``. Each item of the list has a
                 size of sd.num_faces.
 
         """
-        sd = self.mdg.subdomains()[0]
-
         # Retrieve physical data
         F = self.params["applied_load"]
         B = self.skempton_coefficient()
@@ -823,8 +817,8 @@ class Mandel(pp.ContactMechanicsBiot):
         a, _ = self.params["domain_size"]
 
         # Compute specific discharge
-        if t == 0:
-            q = [np.zeros(sd.num_faces), np.zeros(sd.num_faces)]
+        if t == 0:  # https://link.springer.com/content/pdf/10.1007/s10596-018-9736-6.pdf
+            q = [np.zeros_like(x), np.zeros_like(x)]
         else:
             # Retrieve approximated roots
             aa_n = self.approximate_roots()[:, np.newaxis]
@@ -839,14 +833,15 @@ class Mandel(pp.ContactMechanicsBiot):
             )
             qx = c0 * qx_sum0
 
-            q = [qx, np.zeros(sd.num_faces)]
+            q = [qx, np.zeros_like(x)]
 
         return q
 
-    def exact_stress(self,
-                     x: np.ndarray,
-                     t: Union[float, int],
-        ) -> list[list[np.ndarray, np.ndarray], list[np.ndarray, np.ndarray]]:
+    def exact_stress(
+        self,
+        x: np.ndarray,
+        t: Union[float, int],
+    ) -> list[list[np.ndarray, np.ndarray], list[np.ndarray, np.ndarray]]:
         """Exact stress tensor in `Pa`.
 
         In Mandel's problem, only the `yy` component of the stress tensor is non-zero.
@@ -860,9 +855,6 @@ class Mandel(pp.ContactMechanicsBiot):
                 stress tensor. Each item of the inner lists has size sd.num_faces.
 
         """
-
-        sd = self.mdg.subdomains()[0]
-
         # Retrieve physical data
         F = self.params["applied_load"]
         nu_s = self.poisson_coefficient()
@@ -874,21 +866,21 @@ class Mandel(pp.ContactMechanicsBiot):
 
         # Compute exact stress tensor
 
-        sxx = np.zeros(sd.num_faces)  # sxx component of the stress is zero
-        sxy = np.zeros(sd.num_faces)  # sxy components of the stress is zero
-        syx = np.zeros(sd.num_faces)  # syx components of the stress is zero
+        sxx = np.zeros_like(x)  # sxx component of the stress is zero
+        sxy = np.zeros_like(x)  # sxy components of the stress is zero
+        syx = np.zeros_like(x)  # syx components of the stress is zero
 
         if t == 0:  # traction force at t = 0 has a different expression
 
             # Exact initial syy
-            syy = -F / a * np.ones(sd.num_faces)
+            syy = -F / a * np.ones_like(x)
 
             # Exact stress
             stress = [[sxx, sxy], [syx, syy]]
 
         else:
 
-           # Retrieve approximated roots
+            # Retrieve approximated roots
             aa_n = self.approximate_roots()[:, np.newaxis]
 
             # Exact syy
@@ -923,10 +915,10 @@ class Mandel(pp.ContactMechanicsBiot):
 
         """
         sd = self.mdg.subdomains()[0]
-        xc = sd.cell_centers[0]
+        xf = sd.face_centers[0]
         t = self.time_manager.time
         if t == 0:
-            return self.velocity_to_flux(self.exact_velocity(xc, t))
+            return self.velocity_to_flux(self.exact_velocity(xf, t))
         else:
             flux_ad = self._fluid_flux([sd])
             return flux_ad.evaluate(self.dof_manager).val
@@ -939,12 +931,12 @@ class Mandel(pp.ContactMechanicsBiot):
 
         """
         sd = self.mdg.subdomains()[0]
-        xc = sd.cell_centers[0]
+        xf = sd.face_centers[0]
         data = self.mdg.subdomain_data(sd)
         t = self.time_manager.time
 
         if t == 0:
-            return self.ravel(self.stress_to_traction(self.exact_stress(xc, t)))
+            return self.ravel(self.stress_to_traction(self.exact_stress(xf, t)))
         else:
             self.reconstruct_stress()
             return data[pp.STATE]["stress"]
@@ -952,7 +944,7 @@ class Mandel(pp.ContactMechanicsBiot):
     def exact_degree_of_consolidation(self, t: Union[float, int]) -> float:
         """Exact degree of consolidation for a given time `t`.
 
-        Args:
+        Parameters:
               t: Time in seconds.
 
         Returns:
@@ -988,8 +980,8 @@ class Mandel(pp.ContactMechanicsBiot):
     def nondim_t(self, t: Union[float, int]) -> float:
         """Nondimensionalize time.
 
-        Args:
-            t: Time in seconds.
+        Parameters:
+            t: Time in `s`.
 
         Returns:
             Dimensionless time for the given time ``t``.
@@ -1003,8 +995,8 @@ class Mandel(pp.ContactMechanicsBiot):
     def nondim_x(self, x: np.ndarray) -> np.ndarray:
         """Nondimensionalize length in the horizontal axis.
 
-        Args:
-            x: horizontal length in meters.
+        Parameters:
+            x: horizontal length in `m`.
 
         Returns:
             Dimensionless horizontal length.
@@ -1016,8 +1008,8 @@ class Mandel(pp.ContactMechanicsBiot):
     def nondim_y(self, y: np.ndarray) -> np.ndarray:
         """Nondimensionalize length in the vertical axis.
 
-        Args:
-            y: vertical length in meters.
+        Parameters:
+            y: vertical length in `m`.
 
         Returns:
             Dimensionless vertical length.
@@ -1029,8 +1021,8 @@ class Mandel(pp.ContactMechanicsBiot):
     def nondim_p(self, p: np.ndarray) -> np.ndarray:
         """Nondimensionalize pressure.
 
-        Args:
-            p: Pressure in Pascals.
+        Parameters:
+            p: Pressure in `Pa`.
 
         Returns:
             Nondimensional pressure.
@@ -1040,40 +1032,81 @@ class Mandel(pp.ContactMechanicsBiot):
         F = self.params["vertical_load"]  # [N * m^{-1}]
         return p / (F * a)
 
+    def nondim_flux(self, q: np.ndarray) -> np.ndarray:
+        """Nondimensionalize specific discharge.
+
+        Parameters:
+            q: Specific discharge in `m * s^{-1}`.
+
+        Returns:
+            Non-dimensional specific discharge.
+
+        """
+        k = self.params["permeability"]  # [m^2]
+        F = self.params["vertical_load"]  # [N * m^{-1}]
+        mu = self.params["viscosity"]  # [Pa * s]
+        a, _ = self.params["domain_size"]  # [m]
+        factor = (F * k) / (mu * a ** 2)  # [m * s^{-1}]
+        return q / factor
+
     # -----> Helper methods
 
-    def xcut(self, array: np.ndarray) -> np.ndarray:
-        """Perform a horizontal cut at the bottom of the domain.
-
-        For triangular grids, this is done by obtaining the closest cell-centers to the line
-        constructed from the points (0, 0) and (a, 0). For perturbed Cartesian grids,
-        we simply select the cells corresponding to the bottom row.
+    def xcut(self, array: np.ndarray, through_cells: bool) -> np.ndarray:
+        """Perform a horizontal close to the south of the domain.
 
         Parameters:
             array: Array to be cut. Shape is (sd.num_cells, ).
+            through_cells: True if the cut should pick cell-center quantities. False if the
+                cut should pick face-center quantities.
 
         Returns:
-            Horizontally cut array from (0, dx) to (a, dx), where dx = cell diameter / 2.
+            Horizontally cut array from (0, dy) to (a, dy), where dy = cell size / 2.
+
+        Raises:
+            NotImplementedError if the mesh type is not Cartesian.
 
         """
-        if self.params["mesh_type"] == "cartesian":
-            nx, ny = self.params["num_cells"]
-            cut_array = array[: ny : nx * ny]
+        if not self.params["mesh_type"] == "cartesian":
+            raise NotImplementedError("Method only available for Cartesian grids.")
+
+        nx, _ = self.params["num_cells"]
+        if through_cells:
+            cut_array = array[:nx]
         else:
-            sd = self.mdg.subdomains()[0]
-            a, _ = self.params["domain_size"]
-            half_max_diam = np.max(sd.cell_diameters()) / 2
-            xc = np.arange(0, a, half_max_diam)
-            closest_cells = sd.closest_cell(np.array([xc, np.zeros_like(xc)]))
-            _, idx = np.unique(closest_cells, return_index=True)
-            x_points = closest_cells[np.sort(idx)]
-            cut_array = array[x_points]
+            cut_array = array[:nx+1]
+
+        return cut_array
+
+    def ycut(self, array: np.ndarray, through_cells: bool) -> np.ndarray:
+        """Perform a vertical cut close to the west side of the domain.
+
+        Parameters:
+            array: Array to be cut. Shape is (sd.num_cells, ).
+            through_cells: True if the cut should pick cell-center quantities. False if the
+                cut should pick face-center quantities.
+
+        Returns:
+            Vertically cut array from (dx, 0) to (dx, b), where dx =  cell size / 2.
+
+        Raises:
+            NotImplementedError if the mesh type is not Cartesian.
+
+        """
+        if not self.params["mesh_type"] == "cartesian":
+            raise NotImplementedError("Method only available for Cartesian grids.")
+
+        nx, ny = self.params["num_cells"]
+        if through_cells:
+            cut_array = array[: nx * ny : nx]
+        else:
+            cut_array = array[: (nx + 1) * (ny + 1): (nx + 1)]
+
 
         return cut_array
 
     def velocity_to_flux(
-            self,
-            velocity: list[np.ndarray, np.ndarray],
+        self,
+        velocity: list[np.ndarray, np.ndarray],
     ) -> np.ndarray:
         """Convert a velocity field into (integrated normal) fluxes.
 
@@ -1099,9 +1132,8 @@ class Mandel(pp.ContactMechanicsBiot):
         return flux
 
     def stress_to_traction(
-            self,
-            stress: list[list[np.ndarray, np.ndarray], list[np.ndarray, np.ndarray]],
-
+        self,
+        stress: list[list[np.ndarray, np.ndarray], list[np.ndarray, np.ndarray]],
     ) -> list[np.ndarray, np.ndarray]:
         """Convert a stress field into (integrated normal) traction forces.
 
@@ -1121,8 +1153,12 @@ class Mandel(pp.ContactMechanicsBiot):
         assert stress[1][0].size == sd.num_faces
         assert stress[1][1].size == sd.num_faces
 
-        traction_x = stress[0][0] * sd.face_normals[0] + stress[0][1] * sd.face_normals[1]
-        traction_y = stress[1][0] * sd.face_normals[0] + stress[1][1] * sd.face_normals[1]
+        traction_x = (
+            stress[0][0] * sd.face_normals[0] + stress[0][1] * sd.face_normals[1]
+        )
+        traction_y = (
+            stress[1][0] * sd.face_normals[0] + stress[1][1] * sd.face_normals[1]
+        )
 
         return [traction_x, traction_y]
 
@@ -1182,72 +1218,41 @@ class Mandel(pp.ContactMechanicsBiot):
 
         return l2_error
 
-
-
-    # # Postprocessing methods
-    # def postprocess_results(self) -> None:
-    #     """Postprocessing of results for plotting.
-    #
-    #     Note:
-    #         This method will create the following new fields, for all scheduled times,
-    #         in the `self.sol` dictionary: `dimless_x`, `dimlesss_y`, `dimless_p_ex`,
-    #         `dimless_p_num`, `dimless_ux_num`, `dimless_ux_ex`, `dimless_uy_num`,
-    #         and `dimless_uy_ex`.
-    #
-    #     """
-    #     sd = self.mdg.subdomains()[0]
-    #
-    #     F = self.params["applied_load"]
-    #
-    #     a, b = self.params["domain_size"]
-    #     xc = sd.cell_centers[0]
-    #     yc = sd.cell_centers[1]
-    #
-    #     for t in self.time_manager.schedule:
-    #
-    #         # Retrieve numerical and exact pressures
-    #         p_num = self.sol[t]["p_num"]
-    #         p_ex = self.exact_pressure(t)
-    #
-    #         # Retrieve numerical and exact displacements
-    #         u_num = self.sol[t]["u_num"]
-    #         ux_num = u_num[:: sd.dim]
-    #         uy_num = u_num[1 :: sd.dim]
-    #         u_ex = self.exact_displacement(t)
-    #         ux_ex = u_ex[:: sd.dim]
-    #         uy_ex = u_ex[1 :: sd.dim]
-    #
-    #         # Store relevant quantities
-    #         self.sol[t]["dimless_xc"] = self.horizontal_cut(xc / a)
-    #         self.sol[t]["dimless_yc"] = self.horizontal_cut(yc / b)
-    #
-    #         self.sol[t]["dimless_p_num"] = self.horizontal_cut(p_num * a / F)
-    #         self.sol[t]["dimless_p_ex"] = self.horizontal_cut(p_ex * a / F)
-    #
-    #         self.sol[t]["dimless_ux_num"] = self.horizontal_cut(ux_num / a)
-    #         self.sol[t]["dimless_ux_ex"] = self.horizontal_cut(ux_ex / a)
-    #         self.sol[t]["dimless_uy_num"] = self.horizontal_cut(uy_num / b)
-    #         self.sol[t]["dimless_uy_ex"] = self.horizontal_cut(uy_ex / b)
-
     # Plotting
     def plot_results(self):
-        """Plot dimensionless pressure, horizontal, and vertical displacements"""
+        """Plot results"""
 
         folder = "out/"
-        fnamep = "pressure"
-        fnameux = "horizontal_displacement"
-        fnameuy = "vertical_displacement"
+        fname_p = "pressure"
+        fname_ux = "horizontal_displacement"
+        fname_uy = "vertical_displacement"
+        fname_qx = "horizontal_flux"
+        fname_syy = "vertical_stress"
         extension = ".pdf"
         cmap = mcolors.ListedColormap(
             plt.cm.tab20.colors[: len(self.time_manager.schedule)]
         )
 
-        # Pressure plot
-        self._pressure_plot(
-            folder=folder, file_name=fnamep, file_extension=extension, color_map=cmap
-        )
+        # Nondimensional pressure plot
+        self._plot_pressure(folder=folder, file_name=fname_p, file_extension=extension,
+                            color_map=cmap)
 
-    def _pressure_plot(
+        # Nondimensional horizontal displacement
+        self._plot_horizontal_displacement(folder=folder, file_name=fname_ux,
+                                           file_extension=extension, color_map=cmap)
+
+        # Mondimensional vertical displacement
+        self._plot_vertical_displacement(folder=folder, file_name=fname_uy,
+                                         file_extension=extension, color_map=cmap)
+
+        # Nondimensional horizontal specific discharge
+        self._plot_horizontal_flux(folder=folder, file_name=fname_qx, file_extension=extension,
+                                   color_map=cmap)
+
+        # Nondimensional vertical stress
+
+
+    def _plot_pressure(
         self,
         folder: str,
         file_name: str,
@@ -1256,7 +1261,7 @@ class Mandel(pp.ContactMechanicsBiot):
     ) -> None:
         """Plot nondimensional pressure profiles.
 
-        Args:
+        Parameters:
             folder: name of the folder to store the results e.g., "out/".
             file_name: name of the file e.g., "pressure_profiles".
             file_extension: extension of the file e.g., ".pdf".
@@ -1271,17 +1276,15 @@ class Mandel(pp.ContactMechanicsBiot):
         a, _ = self.params["domain_size"]
         x_ex = np.linspace(0, a, 400)
 
-        t = self.time_manager.time
-
         for idx, sol in enumerate(self.solutions):
             ax.plot(
-                self.nondim_p(self.exact_pressure(x=x_ex, t=sol.time)),
                 self.nondim_x(x=x_ex),
+                self.nondim_p(self.exact_pressure(x=x_ex, t=sol.time)),
                 color=color_map.colors[idx],
             )
             ax.plot(
-                self.xcut(sol.num_pressure),
-                self.xcut(self.nondim_x(xc)),
+                self.xcut(self.nondim_x(xc), through_cells=True),
+                self.xcut(self.nondim_p(sol.num_pressure), through_cells=True),
                 color=color_map.colors[idx],
                 linewidth=0,
                 marker=".",
@@ -1294,7 +1297,7 @@ class Mandel(pp.ContactMechanicsBiot):
                 linewidth=0,
                 marker="s",
                 markersize=12,
-                label=rf"$t=${t}",
+                label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
             )
         ax.set_xlabel(r"$\tilde{x} = x/a$", fontsize=15)
         ax.set_ylabel(r"$\tilde{p} = p/(F a)$", fontsize=15)
@@ -1307,35 +1310,40 @@ class Mandel(pp.ContactMechanicsBiot):
         plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
         plt.gcf().clear()
 
-    def _displacement_plots(
+    def _plot_horizontal_displacement(
         self,
         folder: str,
-        file_names: tuple[str, str],
+        file_name: str,
         file_extension: str,
         color_map: mcolors.ListedColormap,
     ) -> None:
-        """Plot nondimensional pressure profiles.
+        """Plot nondimensional horizontal displacement profiles.
 
-        Args:
+        Parameters:
             folder: name of the folder to store the results e.g., "out/".
-            file_names: name of the files e.g., ("ux", "uy").
+            file_name: name of the file e.g., "x_displacement".
             file_extension: extension of the file e.g., ".pdf".
             color_map: listed color map object.
-        """
 
-        fname_ux, fname_uy = file_names
+        """
+        sd = self.mdg.subdomains()[0]
+        xc = sd.cell_centers[0]
+
+        a, b = self.params["domain_size"]
+        y_ex = np.linspace(0, b, 400)
+        x_ex = np.linspace(0, a, 400)
 
         # Horizontal displacement plot
         fig, ax = plt.subplots(figsize=(9, 8))
-        for idx, t in enumerate(self.time_manager.schedule):
+        for idx, sol in enumerate(self.solutions):
             ax.plot(
-                self.sol[t]["dimless_xc"],
-                self.sol[t]["dimless_ux_ex"],
+                self.nondim_x(x_ex),
+                self.nondim_x(self.exact_displacement(x_ex, y_ex, sol.time)[0]),
                 color=color_map.colors[idx],
             )
             ax.plot(
-                self.sol[t]["dimless_xc"],
-                self.sol[t]["dimless_ux_num"],
+                self.xcut(self.nondim_x(xc), through_cells=True),
+                self.xcut(sol.num_nondim_displacement_x, through_cells=True),
                 color=color_map.colors[idx],
                 linewidth=0,
                 marker=".",
@@ -1348,7 +1356,7 @@ class Mandel(pp.ContactMechanicsBiot):
                 linewidth=0,
                 marker="s",
                 markersize=12,
-                label=rf"$t=${t}",
+                label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
             )
         ax.set_xlabel(r"$x/a$", fontsize=15)
         ax.set_ylabel(r"$u_x/a$", fontsize=15)
@@ -1358,57 +1366,129 @@ class Mandel(pp.ContactMechanicsBiot):
         plt.subplots_adjust(right=0.7)
         if not os.path.exists(folder):
             os.makedirs(folder)
-        plt.savefig(folder + fname_ux + file_extension, bbox_inches="tight")
+        plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
         plt.gcf().clear()
 
-    # Vertical displacement plot
-
-    # -----> Errors as a function of time
-    # error_p = np.asarray([self.sol[t]["error_pressure"] for t in self.tsc.schedule])
-    # error_u = np.asarray([self.sol[t]["error_displacement"] for t in self.tsc.schedule])
-    # error_Q = np.asarray([self.sol[t]["error_flux"] for t in self.tsc.schedule])
-    # error_T = np.asarray([self.sol[t]["error_traction"] for t in self.tsc.schedule])
-    # times = np.asarray(self.tsc.schedule)
-    #
-    # fig, ax = plt.subplots(figsize=(9, 8))
-    # ax.loglog(times, error_p, "o-", label="Pressure error")
-    # ax.loglog(times, error_u, "o-", label="Displacement error")
-    # ax.loglog(times, error_Q, "o-", label="Flux error")
-    # ax.loglog(times, error_T, "o-", label="Traction error")
-    # ax.legend(fontsize=13)
-    # ax.set_xlabel("Time [s]", fontsize=15)
-    # ax.set_ylabel("Discrete L2-error [-]", fontsize=15)
-    # ax.set_title("L2-errors as a function of time", fontsize=16)
-    # ax.grid()
-    # plt.show()
-
-    def plot_field(
+    def _plot_vertical_displacement(
         self,
-        t: Union[float, int],
-        field: Literal["p_num", "ux_num", "uy_num", "p_ex", "ux_ex", "uy_ex"],
+        folder: str,
+        file_name: str,
+        file_extension: str,
+        color_map: mcolors.ListedColormap,
     ) -> None:
-        """Plot pressure field for a given time `t`."""
+        """Plot nondimensional vertical displacement profiles.
 
+        Parameters:
+            folder: name of the folder to store the results e.g., "out/".
+            file_name: name of the file e.g., "y_displacement".
+            file_extension: extension of the file e.g., ".pdf".
+            color_map: listed color map object.
+
+        """
         sd = self.mdg.subdomains()[0]
+        yc = sd.cell_centers[1]
 
-        ratio = np.round(self.params["width"] / self.params["height"])
-        figsize = (int(5 * ratio), 5)
+        a, b = self.params["domain_size"]
+        y_ex = np.linspace(0, b, 400)
+        x_ex = np.linspace(0, a, 400)
 
-        if field == "p_num":
-            array = self.sol[t]["p_num"]
-        elif field == "ux_num":
-            array = self.sol[t]["u_num"][:: sd.dim]
-        elif field == "uy_num":
-            array = self.sol[t]["u_num"][1 :: sd.dim]
-        elif field == "p_ex":
-            array = self.sol[t]["p_ex"]
-        elif field == "ux_ex":
-            array = self.sol[t]["u_ex"][:: sd.dim]
-        else:
-            array = self.sol[t]["u_ex"][1 :: sd.dim]
+        # Vertical displacement plot
+        fig, ax = plt.subplots(figsize=(9, 8))
+        for idx, sol in enumerate(self.solutions):
+            ax.plot(
+                self.nondim_y(y_ex),
+                self.nondim_y(self.exact_displacement(x_ex, y_ex, sol.time)[1]),
+                color=color_map.colors[idx],
+            )
+            ax.plot(
+                self.ycut(self.nondim_y(yc), through_cells=True),
+                self.ycut(sol.num_nondim_displacement_y, through_cells=True),
+                color=color_map.colors[idx],
+                linewidth=0,
+                marker=".",
+                markersize=8,
+            )
+            ax.plot(
+                [],
+                [],
+                color=color_map.colors[idx],
+                linewidth=0,
+                marker="s",
+                markersize=12,
+                label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
+            )
+        ax.set_xlabel(r"$y/b$", fontsize=15)
+        ax.set_ylabel(r"$u_y/b$", fontsize=15)
+        ax.legend(loc="center right", bbox_to_anchor=(1.4, 0.5), fontsize=13)
+        ax.set_title("Normalized vertical displacement profiles", fontsize=16)
+        ax.grid()
+        plt.subplots_adjust(right=0.7)
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
+        plt.gcf().clear()
 
-        pp.plot_grid(sd, array, figsize=figsize, plot_2d=True, title=field)
+    def _plot_horizontal_flux(
+        self,
+        folder: str,
+        file_name: str,
+        file_extension: str,
+        color_map: mcolors.ListedColormap,
+    ) -> None:
+        """Plot nondimensional flux profiles.
 
+        Parameters:
+            folder: name of the folder to store the results e.g., "out/".
+            file_name: name of the file e.g., "flux".
+            file_extension: extension of the file e.g., ".pdf".
+            color_map: listed color map object.
+
+        """
+        sd = self.mdg.subdomains()[0]
+        xf = sd.face_centers[0]
+        nx = sd.face_normals[0]
+
+        a, _ = self.params["domain_size"]
+        x_ex = np.linspace(0, a, 400)
+
+        # Flux plot
+        fig, ax = plt.subplots(figsize=(9, 8))
+        for idx, sol in enumerate(self.solutions):
+            ax.plot(
+                self.nondim_x(x_ex),
+                self.nondim_flux(self.exact_velocity(x_ex, sol.time)[0]),
+                color=color_map.colors[idx],
+            )
+            ax.plot(
+                self.xcut(self.nondim_x(xf), through_cells=False),
+                self.xcut(self.nondim_flux(sol.num_flux / nx), through_cells=False),
+                color=color_map.colors[idx],
+                linewidth=0,
+                marker=".",
+                markersize=8,
+            )
+            ax.plot(
+                [],
+                [],
+                color=color_map.colors[idx],
+                linewidth=0,
+                marker="s",
+                markersize=12,
+                label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
+            )
+        ax.set_xlabel(r"$\tilde{x} = x/a$", fontsize=15)
+        ax.set_ylabel(r"$\tilde{q}_x = q_x \, \mu_f \, a^2 \, / \,  F \, k)$", fontsize=15)
+        ax.legend(loc="center right", bbox_to_anchor=(1.4, 0.5), fontsize=13)
+        ax.set_title("Nondimensional horizontal flux profiles", fontsize=16)
+        ax.grid()
+        plt.subplots_adjust(right=0.7)
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
+        plt.gcf().clear()
+
+    def _plot_vertical_stress(self):
+        pass
 
 #%% Runner
 
@@ -1418,14 +1498,14 @@ time_manager = pp.TimeManager(
         0,
         10,
         50,
-        100,
-        500,
+        120,
+        300,
     ],  # [s]
     dt_init=1,  # [s]
     constant_dt=True,
 )
 # Create application's parameter dictionary
-app_params = {
+params = {
     "use_ad": True,
     "mu_lame": 2.475e9,  # [Pa]
     "lambda_lame": 1.650e9,  # [Pa]
@@ -1438,13 +1518,13 @@ app_params = {
     "num_cells": (20, 20),
     "time_manager": time_manager,
     "plot_results": True,
-    "perturbation_factor": 1e-7,
+    "perturbation_factor": 1e-6,
     "mesh_type": "cartesian",
-    "mesh_size": 2.0,  # [m]
+    # "mesh_size": 2.0,  # [m]
 }
 # Run model
-setup = Mandel(app_params)
-pp.run_time_dependent_model(setup, app_params)
+setup = Mandel(params)
+pp.run_time_dependent_model(setup, params)
 
 #%% Plotting
 sd = setup.mdg.subdomains()[0]
