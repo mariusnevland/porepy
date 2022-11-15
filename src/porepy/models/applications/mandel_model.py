@@ -66,10 +66,7 @@ class MandelSolution:
 
         # Pressure variables
         self.num_pressure = data[pp.STATE][p_var]
-        self.num_nondim_pressure = setup.nondim_p(self.num_pressure)
-
         self.ex_pressure = setup.exact_pressure(xc, t)
-        self.ex_nondim_pressure = setup.nondim_p(self.ex_pressure)
 
         # Flux variables
         self.num_flux = setup.numerical_flux()
@@ -79,14 +76,10 @@ class MandelSolution:
         self.num_displacement = data[pp.STATE][u_var]
         self.num_displacement_x = self.num_displacement[:: sd.dim]
         self.num_displacement_y = self.num_displacement[1 :: sd.dim]
-        self.num_nondim_displacement_x = setup.nondim_x(self.num_displacement_x)
-        self.num_nondim_displacement_y = setup.nondim_y(self.num_displacement_y)
 
         self.ex_displacement = setup.ravel(setup.exact_displacement(xc, yc, t))
         self.ex_displacement_x = self.ex_displacement[:: sd.dim]
         self.ex_displacement_y = self.ex_displacement[1 :: sd.dim]
-        self.ex_nondim_displacement_x = setup.nondim_x(self.ex_displacement_x)
-        self.ex_nondim_displacement_y = setup.nondim_y(self.ex_displacement_y)
 
         # Traction variables
         self.num_traction = setup.numerical_traction()
@@ -911,7 +904,7 @@ class Mandel(pp.ContactMechanicsBiot):
         """Compute numerical flux.
 
         Returns:
-            Numerical Darcy fluxes at the face centers. Shape is (sd.num_faces, ).
+            Darcy fluxes at the face centers in `m^3 * s^{-1}`. Shape is (sd.num_faces, ).
 
         """
         sd = self.mdg.subdomains()[0]
@@ -927,7 +920,7 @@ class Mandel(pp.ContactMechanicsBiot):
         """Compute numerical traction.
 
         Returns:
-            Numerical tractions at the face centers. Shape is (sd.dim * sd.num_faces, ).
+            Traction at the face centers in `N`. Shape is (sd.dim * sd.num_faces, ).
 
         """
         sd = self.mdg.subdomains()[0]
@@ -942,20 +935,19 @@ class Mandel(pp.ContactMechanicsBiot):
             return data[pp.STATE]["stress"]
 
     def exact_degree_of_consolidation(self, t: Union[float, int]) -> float:
-        """Exact degree of consolidation for a given time `t`.
+        """Exact degree of consolidation.
 
         Parameters:
-              t: Time in seconds.
+              t: Time in `s`.
 
         Returns:
-              U: Exact degree of consolidation for a given time `t`.
+              Exact degree of consolidation for a given time ``t``.
 
-        Implementation note:
+        Notes:
             The degrees of consolidation in the horizontal and vertical directions are
             identical.
 
         """
-
         # Retrieve physical data
         nu_u = self.undrained_poisson_coefficient()
         nu_s = self.poisson_coefficient()
@@ -1032,14 +1024,14 @@ class Mandel(pp.ContactMechanicsBiot):
         F = self.params["vertical_load"]  # [N * m^{-1}]
         return p / (F * a)
 
-    def nondim_flux(self, q: np.ndarray) -> np.ndarray:
-        """Nondimensionalize specific discharge.
+    def nondim_flux(self, qx: np.ndarray) -> np.ndarray:
+        """Nondimensionalize horizontal component of the specific discharge vector.
 
         Parameters:
-            q: Specific discharge in `m * s^{-1}`.
+            qx: Horizontal component of the specific discharge in `m * s^{-1}`.
 
         Returns:
-            Non-dimensional specific discharge.
+            Nondimensional horizontal component of the specific discharge.
 
         """
         k = self.params["permeability"]  # [m^2]
@@ -1047,7 +1039,21 @@ class Mandel(pp.ContactMechanicsBiot):
         mu = self.params["viscosity"]  # [Pa * s]
         a, _ = self.params["domain_size"]  # [m]
         factor = (F * k) / (mu * a ** 2)  # [m * s^{-1}]
-        return q / factor
+        return qx / factor
+
+    def nondim_stress(self, syy: np.ndarray) -> np.ndarray:
+        """Nondimensionalize vertical component of the stress tensor.
+
+        Parameters:
+            syy: Vertical component of the stress tensor.
+
+        Returns:
+            Nondimensional vertical component of the stress tensor.
+
+        """
+        a, _ = self.params["domain_size"]  # [m]
+        F = self.params["vertical_load"]  # [N * m^{-1}]
+        return syy / (F / a)
 
     # -----> Helper methods
 
@@ -1099,8 +1105,7 @@ class Mandel(pp.ContactMechanicsBiot):
         if through_cells:
             cut_array = array[: nx * ny : nx]
         else:
-            cut_array = array[: (nx + 1) * (ny + 1): (nx + 1)]
-
+            cut_array = array[(nx + 1) * ny + 9 * nx: (nx + 1) * ny + 10 * nx]
 
         return cut_array
 
@@ -1250,7 +1255,12 @@ class Mandel(pp.ContactMechanicsBiot):
                                    color_map=cmap)
 
         # Nondimensional vertical stress
-
+        self._plot_vertical_stress(
+            folder=folder,
+            file_name=fname_syy,
+            file_extension=extension,
+            color_map=cmap
+        )
 
     def _plot_pressure(
         self,
@@ -1343,7 +1353,7 @@ class Mandel(pp.ContactMechanicsBiot):
             )
             ax.plot(
                 self.xcut(self.nondim_x(xc), through_cells=True),
-                self.xcut(sol.num_nondim_displacement_x, through_cells=True),
+                self.xcut(self.nondim_x(sol.num_displacement_x), through_cells=True),
                 color=color_map.colors[idx],
                 linewidth=0,
                 marker=".",
@@ -1402,7 +1412,7 @@ class Mandel(pp.ContactMechanicsBiot):
             )
             ax.plot(
                 self.ycut(self.nondim_y(yc), through_cells=True),
-                self.ycut(sol.num_nondim_displacement_y, through_cells=True),
+                self.ycut(self.nondim_y(sol.num_displacement_y), through_cells=True),
                 color=color_map.colors[idx],
                 linewidth=0,
                 marker=".",
@@ -1435,7 +1445,7 @@ class Mandel(pp.ContactMechanicsBiot):
         file_extension: str,
         color_map: mcolors.ListedColormap,
     ) -> None:
-        """Plot nondimensional flux profiles.
+        """Plot nondimensional horizontal flux profiles.
 
         Parameters:
             folder: name of the folder to store the results e.g., "out/".
@@ -1487,8 +1497,67 @@ class Mandel(pp.ContactMechanicsBiot):
         plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
         plt.gcf().clear()
 
-    def _plot_vertical_stress(self):
-        pass
+    def _plot_vertical_stress(
+        self,
+        folder: str,
+        file_name: str,
+        file_extension: str,
+        color_map: mcolors.ListedColormap,
+    ) -> None:
+        """Plot nondimensional vertical stress profiles.
+
+        Parameters:
+            folder: name of the folder to store the results e.g., "out/".
+            file_name: name of the file e.g., "sigma_yy".
+            file_extension: extension of the file e.g., ".pdf".
+            color_map: listed color map object.
+
+        """
+        sd = self.mdg.subdomains()[0]
+        xf = sd.face_centers[0]
+        ny = sd.face_normals[1]
+
+        a, b = self.params["domain_size"]
+        x_ex = np.linspace(0, a, 400)
+
+        # Vertical stress plot
+        fig, ax = plt.subplots(figsize=(9, 8))
+        for idx, sol in enumerate(self.solutions):
+            ax.plot(
+                self.nondim_x(x_ex),
+                self.nondim_stress(self.exact_stress(x_ex, sol.time)[1][1]),
+                color=color_map.colors[idx],
+            )
+            ax.plot(
+                self.ycut(self.nondim_x(xf), through_cells=False),
+                self.ycut(
+                    self.nondim_stress(sol.num_traction[1::sd.dim] / ny),
+                    through_cells=False
+                ),
+                color=color_map.colors[idx],
+                linewidth=0,
+                marker=".",
+                markersize=8,
+            )
+            ax.plot(
+                [],
+                [],
+                color=color_map.colors[idx],
+                linewidth=0,
+                marker="s",
+                markersize=12,
+                label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
+            )
+        ax.set_xlabel(r"$\tilde{x} = x\,/\,a$", fontsize=15)
+        ax.set_ylabel(r"$\tilde{\sigma}_{yy} = \sigma_{yy}\, a\, / \,F$", fontsize=15)
+        ax.legend(loc="center right", bbox_to_anchor=(1.4, 0.5), fontsize=13)
+        ax.set_title("Nondimensional vertical stress profiles", fontsize=16)
+        ax.grid()
+        plt.subplots_adjust(right=0.7)
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
+        plt.gcf().clear()
 
 #%% Runner
 
@@ -1501,7 +1570,7 @@ time_manager = pp.TimeManager(
         120,
         300,
     ],  # [s]
-    dt_init=1,  # [s]
+    dt_init=0.01,  # [s]
     constant_dt=True,
 )
 # Create application's parameter dictionary
@@ -1518,7 +1587,7 @@ params = {
     "num_cells": (20, 20),
     "time_manager": time_manager,
     "plot_results": True,
-    "perturbation_factor": 1e-6,
+    "perturbation_factor": 1e-5,
     "mesh_type": "cartesian",
     # "mesh_size": 2.0,  # [m]
 }
