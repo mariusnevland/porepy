@@ -903,46 +903,29 @@ class Mandel(pp.ContactMechanicsBiot):
               Exact degree of consolidation for a given time ``t``.
 
         Notes:
-            The degrees of consolidation in the horizontal and vertical directions are
-            identical.
+            The degrees of consolidation in the horizontal and vertical axes are identical.
 
         """
-        # Retrieve physical data
+        # Retrieve physical and geometric data
         nu_u = self.undrained_poisson_coefficient()  # [-]
         nu_s = self.poisson_coefficient()  # [-]
         mu_s = self.params["mu_lame"]  # [Pa]
-        c_f = self.fluid_diffusivity()  # [m^2 * s^{-1}]
         F = self.params["vertical_load"]  # [N * m^{-1}]
+        a, b = self.params["domain_size"]  # ([m], [m])
 
-        # Retrieve geometrical data
-        a, b = self.params["domain_size"]
-
-        # Retrieve approximated roots
-        aa_n = self.approximate_roots()[:, np.newaxis]
-
-        # Compute degree of consolidation
-        c0 = (4 * (1 - nu_u)) / (1 - 2 * nu_s)
-        consol_degree_sum0 = np.sum(
-            ((np.cos(aa_n) * np.sin(aa_n)) / (aa_n - np.sin(aa_n) * np.cos(aa_n)))
-            * np.exp((-(aa_n**2) * c_f * t) / (a**2))
-        )
-        consol_degree = 1.0 - c0 * consol_degree_sum0
-
-        # The good one
-
-        ux_a_t = self.exact_horizontal_displacement(np.array([a]), t)
-        ux_a_0 = (F * nu_u) / (2 * mu_s)
-        ux_a_inf = (F * nu_s) / (2 * mu_s)
-        consol_degree_x = (ux_a_t - ux_a_0) / (ux_a_inf - ux_a_0)
-
+        # Vertical displacement on the north boundary at time `t`
         uy_b_t = self.exact_vertical_displacement(np.array([b]), t)
+
+        # Initial vertical displacement on the north boundary.
         uy_b_0 = (-F * b * (1 - nu_u)) / (2 * mu_s * a)
+
+        # Vertical displacement on the north boundary at time `infinity`
         uy_b_inf = (-F * b * (1 - nu_s)) / (2 * mu_s * a)
-        consol_degree_y = (uy_b_t - uy_b_0) / (uy_b_inf - uy_b_0)
 
-        return consol_degree_x, consol_degree_y
+        # Degree of consolidation
+        consolidation_degree = (uy_b_t - uy_b_0) / (uy_b_inf - uy_b_0)
 
-
+        return consolidation_degree
 
     # -----> Non-primary variables
 
@@ -1034,7 +1017,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
     # ------> Methods related to non-dimensionalization of variables
 
-    def nondim_t(self, t: Union[float, int]) -> float:
+    def nondim_t(self, t: Union[float, int, np.ndarray]) -> float:
         """Nondimensionalize time.
 
         Parameters:
@@ -1044,8 +1027,8 @@ class Mandel(pp.ContactMechanicsBiot):
             Dimensionless time for the given time ``t``.
 
         """
-        a, _ = self.params["domain_size"]
-        c_f = self.fluid_diffusivity()
+        a, _ = self.params["domain_size"]  # [m]
+        c_f = self.fluid_diffusivity()  # [m^2 * s^{-1}]
 
         return (t * c_f) / (a**2)
 
@@ -1059,7 +1042,7 @@ class Mandel(pp.ContactMechanicsBiot):
             Dimensionless horizontal length.
 
         """
-        a, _ = self.params["domain_size"]
+        a, _ = self.params["domain_size"]  # [m]
         return x / a
 
     def nondim_y(self, y: np.ndarray) -> np.ndarray:
@@ -1072,7 +1055,7 @@ class Mandel(pp.ContactMechanicsBiot):
             Dimensionless vertical length.
 
         """
-        _, b = self.params["domain_size"]
+        _, b = self.params["domain_size"]  # [m]
         return y / b
 
     def nondim_p(self, p: np.ndarray) -> np.ndarray:
@@ -1529,7 +1512,7 @@ class Mandel(pp.ContactMechanicsBiot):
         file_extension: str,
         color_map: mcolors.ListedColormap,
     ) -> None:
-        """Plot non-dimensional horizontal velocity profiles.
+        """Plot non-dimensional horizontal Darcy flux profiles.
 
         Parameters:
             folder: name of the folder to store the results e.g., "out/".
@@ -1598,7 +1581,7 @@ class Mandel(pp.ContactMechanicsBiot):
         file_extension: str,
         color_map: mcolors.ListedColormap,
     ) -> None:
-        """Plot nondimensional vertical stress profiles.
+        """Plot non-dimensional vertical stress profiles.
 
         Parameters:
             folder: name of the folder to store the results e.g., "out/".
@@ -1666,42 +1649,61 @@ class Mandel(pp.ContactMechanicsBiot):
         color_map: mcolors.ListedColormap
     ):
         """Plot degree of consolidation as a function of time."""
-        # Retrieve data
 
+        # Retrieve data
         a, _ = self.params["domain_size"]  # [m]
         c_f = self.fluid_diffusivity()  # [m^2 * s^{-1}]
-        tau_init = 1e-3
-        tau_final = 1e1
-        t_ex_init = tau_init * a ** 2 / c_f
-        t_ex_final = tau_final * a ** 2 / c_f
-        ex_times = np.linspace(t_ex_init, t_ex_final, 300)
-        ex_consol_degree_x = np.array(
-            [self.exact_degree_of_consolidation(t)[0] for t in ex_times]
-        )
-        ex_consol_degree_y = np.array(
-            [self.exact_degree_of_consolidation(t)[1] for t in ex_times]
-        )
 
+        # Generate exact consolidation times
+        tau_0 = 1e-3
+        tau_1 = 1e-2
+        tau_2 = 1e0
+        tau_3 = 1e1
+
+        t = lambda tau: tau * a ** 2 / c_f
+
+        interval_0 = np.linspace(t(tau_0), t(tau_1), 100)
+        interval_1 = np.linspace(t(tau_1), t(tau_2), 100)
+        interval_2 = np.linspace(t(tau_2), t(tau_3), 100)
+        ex_times = np.concatenate((interval_0, interval_1))
+        ex_times = np.concatenate((ex_times, interval_2))
+
+        ex_consol_degree = np.array([self.exact_degree_of_consolidation(t) for t in ex_times])
+
+        # Numerical consolidation degrees
         num_times = self.time_manager.schedule
         num_consol_degree_x = np.array([sol.num_consol_degree[0] for sol in self.solutions])
         num_consol_degree_y = np.array([sol.num_consol_degree[1] for sol in self.solutions])
 
         fig, ax = plt.subplots(figsize=(9, 8))
         ax.semilogx(
-            self.nondim_t(ex_times), ex_consol_degree_x, linewidth=2, alpha=0.5,
-            label="Exact horizontal"
+            self.nondim_t(ex_times),
+            ex_consol_degree,
+            alpha=0.5,
+            color="black",
+            linewidth=2,
+            label="Exact"
              )
         ax.semilogx(
-            self.nondim_t(ex_times), ex_consol_degree_y, linewidth=2, alpha=0.5,
-            label="Exact vertical")
-        ax.semilogx(
-            self.nondim_t(num_times), num_consol_degree_x, marker="o", linewidth=0,
-                    markersize=6,
-                    alpha=0.6, label="Horizontal"
+            self.nondim_t(num_times),
+            num_consol_degree_x,
+            marker="s",
+            linewidth=0,
+            markerfacecolor='none',
+            markeredgewidth=2,
+            color="blue",
+            markersize=10,
+            label="Horizontal MPFA/MPSA-FV"
         )
-        ax.semilogx(self.nondim_t(num_times), num_consol_degree_y, marker="s", linewidth=0,
-                    markersize=6,
-                    alpha=0.6, label="Vertical")
+        ax.semilogx(
+            self.nondim_t(num_times),
+            num_consol_degree_y,
+            marker="+",
+            markeredgewidth=2,
+            linewidth=0,
+            color="red",
+            markersize=10,
+            label="Vertical MPFA/MPSA-FV")
         ax.set_xlabel(
             r"Non-dimensional time, $t ~ c_f ~ a^{-2}$", fontsize=13
         )
@@ -1711,7 +1713,7 @@ class Mandel(pp.ContactMechanicsBiot):
             fontsize=13,
         )
         ax.grid()
-        ax.legend()
+        ax.legend(fontsize=12)
         if not os.path.exists(folder):
             os.makedirs(folder)
         plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
