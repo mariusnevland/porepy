@@ -29,15 +29,15 @@ Note:
 """
 from __future__ import annotations
 
-
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
 import porepy as pp
 import os
 import scipy.optimize as opt
+import scipy.sparse as sps
 
-from typing import Literal, Union
+from typing import Union
 from dataclasses import dataclass
 
 
@@ -77,15 +77,21 @@ class MandelSolution:
         self.num_displacement_x = self.num_displacement[:: sd.dim]
         self.num_displacement_y = self.num_displacement[1 :: sd.dim]
 
-        self.ex_displacement = setup.ravel(setup.exact_displacement(xc, yc, t))
-        self.ex_displacement_x = self.ex_displacement[:: sd.dim]
-        self.ex_displacement_y = self.ex_displacement[1 :: sd.dim]
+        self.ex_displacement_x = setup.exact_horizontal_displacement(xc, t)
+        self.ex_displacement_y = setup.exact_vertical_displacement(yc, t)
+        self.ex_displacement = setup.ravel(
+            [self.ex_displacement_x, self.ex_displacement_y]
+        )
 
         # Traction variables
         self.num_traction = setup.numerical_traction()
         self.ex_traction = setup.ravel(
             setup.stress_to_traction(setup.exact_stress(xf, t))
         )
+
+        # Consolidation degree
+        self.num_consol_degree = setup.numerical_consolidation_degree()
+        self.ex_consol_degree = setup.exact_degree_of_consolidation(t)
 
         # Error variables
         self.pressure_error = setup.l2_relative_error(
@@ -224,6 +230,10 @@ class Mandel(pp.ContactMechanicsBiot):
             set_default_params(key, val)
         super().__init__(params)
 
+        # Make sure the perturbation factor only affects Cartesian grids
+        if not self.params["mesh_type"] == "cartesian":
+            self.params["perturbation_factor"] = 1e-10
+
         # ad sanity check
         if not self.params["use_ad"]:
             raise ValueError("Model only valid when ad is used.")
@@ -282,31 +292,14 @@ class Mandel(pp.ContactMechanicsBiot):
         data[pp.STATE][pp.ITERATE][self.scalar_variable] = self.exact_pressure(xc, 0)
 
         # Set initial displacement
-        data[pp.STATE][self.displacement_variable] = self.ravel(
-            self.exact_displacement(xc, yc, 0)
-        )
-        data[pp.STATE][pp.ITERATE][self.displacement_variable] = self.ravel(
-            self.exact_displacement(xc, yc, 0)
-        )
+        ux0 = self.exact_horizontal_displacement(xc, 0)
+        uy0 = self.exact_vertical_displacement(yc, 0)
+        u0 = self.ravel([ux0, uy0])
+        data[pp.STATE][self.displacement_variable] = u0
+        data[pp.STATE][pp.ITERATE][self.displacement_variable] = u0
 
         # Store initial solution
         self.solutions.append(MandelSolution(self))
-
-        # Store initial pressure and displacement distributions in the `sol` dictionary
-        # self.sol[0]["p_num"] = self.exact_pressure(0)
-        # self.sol[0]["p_ex"] = self.exact_pressure(0)
-        # self.sol[0]["u_num"] = self.exact_displacement(0)
-        # self.sol[0]["u_ex"] = self.exact_displacement(0)
-        # self.sol[0]["Q_num"] = self.exact_flux(0)
-        # self.sol[0]["Q_ex"] = self.exact_flux(0)
-        # self.sol[0]["T_num"] = self.exact_traction(0)
-        # self.sol[0]["T_ex"] = self.exact_traction(0)
-        # self.sol[0]["U_num"] = 0
-        # self.sol[0]["U_ex"] = 0
-        # self.sol[0]["error_pressure"] = np.nan
-        # self.sol[0]["error_displacement"] = np.nan
-        # self.sol[0]["error_flux"] = np.nan
-        # self.sol[0]["error_traction"] = np.nan
 
     def _bc_type_scalar(self, sd: pp.Grid) -> pp.BoundaryCondition:
         """Define boundary condition types for the flow subproblem.
@@ -417,6 +410,31 @@ class Mandel(pp.ContactMechanicsBiot):
         schedule = self.time_manager.schedule
         if any([np.isclose(self.time_manager.time, t_sch) for t_sch in schedule]):
             self.solutions.append(MandelSolution(self))
+
+    def update_north_bc_values(self, t: Union[float, int]) -> None:
+        """
+        Updates boundary condition value at the north boundary of the domain.
+
+        Args:
+            t: Time in seconds.
+
+        Note:
+            The key `bc_values` from data[pp.PARAMETERS][self.mechanics_parameter_key]
+            will be updated accordingly.
+
+        """
+        sd = self.mdg.subdomains()[0]
+        data = self.mdg.subdomain_data(sd)
+        kw_m = self.mechanics_parameter_key
+
+        # Retrieve exact vertical displacement at the north boundary
+        tol = self.params["perturbation_factor"]
+        sides = self._domain_boundary_sides(sd, tol)
+        yf_north = sd.face_centers[1][sides.north]
+        uy_north = self.exact_vertical_displacement(yf_north, t)
+
+        # Update values
+        data[pp.PARAMETERS][kw_m]["bc_values"][1 :: sd.dim][sides.north] = uy_north
 
     def after_simulation(self) -> None:
         """Method to be called after the simulation has finished."""
@@ -581,7 +599,7 @@ class Mandel(pp.ContactMechanicsBiot):
         )
         return c_f
 
-    # -----> Exact, numerical, and non-dimensional expressions
+    # -----> Methods related to exact solutions
     def approximate_roots(self) -> np.ndarray:
         """
         Approximate roots to f(x) = 0, where f(x) = tan(x) - ((1-nu)/(nu_u-nu)) x
@@ -626,53 +644,6 @@ class Mandel(pp.ContactMechanicsBiot):
 
         return a_n
 
-    def update_north_bc_values(self, t: Union[float, int]) -> None:
-        """
-        Updates boundary condition value at the north boundary of the domain.
-
-        Args:
-            t: Time in seconds.
-
-        Note:
-            The key `bc_values` from data[pp.PARAMETERS][self.mechanics_parameter_key]
-            will be updated accordingly.
-
-        """
-        sd = self.mdg.subdomains()[0]
-
-        # Retrieve physical data
-        F = self.params["applied_load"]
-        nu_s = self.poisson_coefficient()
-        nu_u = self.undrained_poisson_coefficient()
-        mu_s = self.params["mu_lame"]
-        c_f = self.fluid_diffusivity()
-
-        # Retrieve geometrical data
-        a, b = self.params["domain_size"]
-        yf = sd.face_centers[1]
-        b_faces = sd.tags["domain_boundary_faces"].nonzero()[0]
-        y_max = b_faces[yf[b_faces] > 0.9999 * b]
-
-        # Auxiliary constant terms
-        aa_n = self.approximate_roots()[:, np.newaxis]
-
-        cy0 = (-F * (1 - nu_s)) / (2 * mu_s * a)
-        cy1 = F * (1 - nu_u) / (mu_s * a)
-
-        # Compute exact north boundary condition for the given time `t`
-        uy_sum = np.sum(
-            ((np.sin(aa_n) * np.cos(aa_n)) / (aa_n - np.sin(aa_n) * np.cos(aa_n)))
-            * np.exp((-(aa_n**2) * c_f * t) / (a**2)),
-            axis=0,
-        )
-
-        north_bc = (cy0 + cy1 * uy_sum) * yf[y_max]
-
-        # Update values
-        data = self.mdg.subdomain_data(sd)
-        kw_m = self.mechanics_parameter_key
-        data[pp.PARAMETERS][kw_m]["bc_values"][1::2][y_max] = north_bc
-
     def exact_pressure(self, x: np.ndarray, t: Union[float, int]) -> np.ndarray:
         """
         Exact pressure solution for a given time `t`.
@@ -712,19 +683,18 @@ class Mandel(pp.ContactMechanicsBiot):
 
         return p
 
-    def exact_displacement(
-        self, x: np.ndarray, y: np.ndarray, t: Union[float, str]
-    ) -> list[np.ndarray, np.ndarray]:
+    def exact_horizontal_displacement(
+        self, x: np.ndarray, t: Union[int, float]
+    ) -> np.ndarray:
         """
-        Exact horizontal and vertical displacement for a given time ``t``.
+        Exact horizontal displacement for a given time ``t``.
 
         Args:
-            x: Points in the horizontal axis in meters.
-            y: Points in the vertical axis in meters.
-            t: Time in seconds.
+            x: Points in the horizontal axis in `m`.
+            t: Time in `s`
 
         Returns:
-            Exact displacement in the horizontal and vertical directions.
+            Exact displacement in the horizontal direction.
 
         """
         # Retrieve physical data
@@ -738,17 +708,11 @@ class Mandel(pp.ContactMechanicsBiot):
         a, _ = self.params["domain_size"]
 
         # Determine displacements
-        if t == 0.0:  # initial condition has its own expression
-
+        if t == 0:  # initial condition has its own expression
             ux = ((F * nu_u) / (2 * mu_s * a)) * x
-            uy = ((-F * (1 - nu_u)) / (2 * mu_s * a)) * y
-            u = [ux, uy]
-
         else:
-
             # Retrieve approximated roots
             aa_n = self.approximate_roots()[:, np.newaxis]
-
             # Exact horizontal displacement
             cx0 = (F * nu_s) / (2 * mu_s * a)
             cx1 = -((F * nu_u) / (mu_s * a))
@@ -766,7 +730,38 @@ class Mandel(pp.ContactMechanicsBiot):
                 axis=0,
             )
             ux = (cx0 + cx1 * ux_sum1) * x + cx2 * ux_sum2
+        return ux
 
+    def exact_vertical_displacement(
+        self, y: np.ndarray, t: Union[int, float]
+    ) -> np.ndarray:
+        """
+        Exact vertical displacement for a given time ``t``.
+
+        Args:
+            y: Points in the horizontal axis in `m`.
+            t: Time in `s`
+
+        Returns:
+            Exact displacement in the vertical direction.
+
+        """
+        # Retrieve physical data
+        F = self.params["applied_load"]
+        nu_s = self.poisson_coefficient()
+        nu_u = self.undrained_poisson_coefficient()
+        mu_s = self.params["mu_lame"]
+        c_f = self.fluid_diffusivity()
+
+        # Retrieve geometrical data
+        a, _ = self.params["domain_size"]
+
+        # Determine displacements
+        if t == 0.0:  # initial condition has its own expression
+            uy = ((-F * (1 - nu_u)) / (2 * mu_s * a)) * y
+        else:
+            # Retrieve approximated roots
+            aa_n = self.approximate_roots()[:, np.newaxis]
             # Exact vertical displacement
             cy0 = (-F * (1 - nu_s)) / (2 * mu_s * a)
             cy1 = F * (1 - nu_u) / (mu_s * a)
@@ -776,11 +771,7 @@ class Mandel(pp.ContactMechanicsBiot):
                 axis=0,
             )
             uy = (cy0 + cy1 * uy_sum1) * y
-
-            # Exact u
-            u = [ux, uy]
-
-        return u
+        return uy
 
     def exact_velocity(
         self, x: np.ndarray, t: Union[float, int]
@@ -810,7 +801,9 @@ class Mandel(pp.ContactMechanicsBiot):
         a, _ = self.params["domain_size"]
 
         # Compute specific discharge
-        if t == 0:  # https://link.springer.com/content/pdf/10.1007/s10596-018-9736-6.pdf
+        if (
+            t == 0
+        ):  # https://link.springer.com/content/pdf/10.1007/s10596-018-9736-6.pdf
             q = [np.zeros_like(x), np.zeros_like(x)]
         else:
             # Retrieve approximated roots
@@ -900,6 +893,59 @@ class Mandel(pp.ContactMechanicsBiot):
 
         return stress
 
+    def exact_degree_of_consolidation(self, t: Union[float, int]) -> float:
+        """Exact degree of consolidation.
+
+        Parameters:
+              t: Time in `s`.
+
+        Returns:
+              Exact degree of consolidation for a given time ``t``.
+
+        Notes:
+            The degrees of consolidation in the horizontal and vertical directions are
+            identical.
+
+        """
+        # Retrieve physical data
+        nu_u = self.undrained_poisson_coefficient()  # [-]
+        nu_s = self.poisson_coefficient()  # [-]
+        mu_s = self.params["mu_lame"]  # [Pa]
+        c_f = self.fluid_diffusivity()  # [m^2 * s^{-1}]
+        F = self.params["vertical_load"]  # [N * m^{-1}]
+
+        # Retrieve geometrical data
+        a, b = self.params["domain_size"]
+
+        # Retrieve approximated roots
+        aa_n = self.approximate_roots()[:, np.newaxis]
+
+        # Compute degree of consolidation
+        c0 = (4 * (1 - nu_u)) / (1 - 2 * nu_s)
+        consol_degree_sum0 = np.sum(
+            ((np.cos(aa_n) * np.sin(aa_n)) / (aa_n - np.sin(aa_n) * np.cos(aa_n)))
+            * np.exp((-(aa_n**2) * c_f * t) / (a**2))
+        )
+        consol_degree = 1.0 - c0 * consol_degree_sum0
+
+        # The good one
+
+        ux_a_t = self.exact_horizontal_displacement(np.array([a]), t)
+        ux_a_0 = (F * nu_u) / (2 * mu_s)
+        ux_a_inf = (F * nu_s) / (2 * mu_s)
+        consol_degree_x = (ux_a_t - ux_a_0) / (ux_a_inf - ux_a_0)
+
+        uy_b_t = self.exact_vertical_displacement(np.array([b]), t)
+        uy_b_0 = (-F * b * (1 - nu_u)) / (2 * mu_s * a)
+        uy_b_inf = (-F * b * (1 - nu_s)) / (2 * mu_s * a)
+        consol_degree_y = (uy_b_t - uy_b_0) / (uy_b_inf - uy_b_0)
+
+        return consol_degree_x, consol_degree_y
+
+
+
+    # -----> Non-primary variables
+
     def numerical_flux(self) -> np.ndarray:
         """Compute numerical flux.
 
@@ -924,50 +970,69 @@ class Mandel(pp.ContactMechanicsBiot):
 
         """
         sd = self.mdg.subdomains()[0]
-        xf = sd.face_centers[0]
         data = self.mdg.subdomain_data(sd)
+        xf = sd.face_centers[0]
         t = self.time_manager.time
 
         if t == 0:
             return self.ravel(self.stress_to_traction(self.exact_stress(xf, t)))
         else:
             self.reconstruct_stress()
-            return data[pp.STATE]["stress"]
+            return data[pp.STATE]["stress"].copy()
 
-    def exact_degree_of_consolidation(self, t: Union[float, int]) -> float:
-        """Exact degree of consolidation.
-
-        Parameters:
-              t: Time in `s`.
+    def numerical_consolidation_degree(self) -> tuple[float, float]:
+        """
+        Compute approximated degree of consolidation.
 
         Returns:
-              Exact degree of consolidation for a given time ``t``.
-
-        Notes:
-            The degrees of consolidation in the horizontal and vertical directions are
-            identical.
+            Numerical degree of consolidation in the horizontal and vertical directions.
 
         """
-        # Retrieve physical data
-        nu_u = self.undrained_poisson_coefficient()
-        nu_s = self.poisson_coefficient()
-        c_f = self.fluid_diffusivity()
+        sd = self.mdg.subdomains()[0]
+        data = self.mdg.subdomain_data(sd)
 
-        # Retrieve geometrical data
-        a, _ = self.params["domain_size"]
+        F = self.params["vertical_load"]  # [N * m^{-1}]
+        mu_s = self.params["mu_lame"]  # [Pa]
+        nu_s = self.poisson_coefficient()  # [-]
+        nu_u = self.undrained_poisson_coefficient()  # [-]
+        a, b = self.params["domain_size"]  # [m]
 
-        # Retrieve approximated roots
-        a_n = self.approximate_roots()
+        kw_m = self.mechanics_parameter_key
+        disc = data[pp.DISCRETIZATION_MATRICES][kw_m]
 
-        # Compute degree of consolidation
-        c0 = (4 * (1 - nu_u)) / (1 - 2 * nu_s)
-        U_sum0 = np.sum(
-            ((np.cos(a_n) * np.sin(a_n)) / (a_n - np.sin(a_n) * np.cos(a_n)))
-            * np.exp((-(a_n**2) * c_f * t) / (a**2))
-        )
-        U = 1.0 - c0 * U_sum0
+        p = data[pp.STATE][self.scalar_variable]
+        u = data[pp.STATE][self.displacement_variable]
+        t = self.time_manager.time
 
-        return U
+        if t == 0:
+            return 0.0, 0.0
+
+        else:
+            bc_vals = data[pp.PARAMETERS][kw_m]["bc_values"]
+            bound_u_cell = disc["bound_displacement_cell"]
+            bound_u_face = disc["bound_displacement_face"]
+            bound_u_pressure = disc["bound_displacement_pressure"]
+
+            trace_u = bound_u_cell * u + bound_u_face * bc_vals + bound_u_pressure * p
+
+            sides = self._domain_boundary_sides(sd)
+
+            trace_ux = trace_u[::2]
+            trace_uy = trace_u[1::2]
+
+            ux_a_t = np.max(trace_ux[sides.east])
+            ux_a_0 = (F * nu_u) / (2 * mu_s)
+            ux_a_inf = (F * nu_s) / (2 * mu_s)
+            consol_deg_x = (ux_a_t - ux_a_0) / (ux_a_inf - ux_a_0)
+
+            uy_b_t = np.max(trace_uy[sides.north])
+            uy_b_0 = (-F * b * (1 - nu_u)) / (2 * mu_s * a)
+            uy_b_inf = (-F * b * (1 - nu_s)) / (2 * mu_s * a)
+            consol_deg_y = (uy_b_t - uy_b_0) / (uy_b_inf - uy_b_0)
+
+            return consol_deg_x, consol_deg_y
+
+    # ------> Methods related to non-dimensionalization of variables
 
     def nondim_t(self, t: Union[float, int]) -> float:
         """Nondimensionalize time.
@@ -1038,7 +1103,7 @@ class Mandel(pp.ContactMechanicsBiot):
         F = self.params["vertical_load"]  # [N * m^{-1}]
         mu = self.params["viscosity"]  # [Pa * s]
         a, _ = self.params["domain_size"]  # [m]
-        factor = (F * k) / (mu * a ** 2)  # [m * s^{-1}]
+        factor = (F * k) / (mu * a**2)  # [m * s^{-1}]
         return qx / factor
 
     def nondim_stress(self, syy: np.ndarray) -> np.ndarray:
@@ -1055,7 +1120,20 @@ class Mandel(pp.ContactMechanicsBiot):
         F = self.params["vertical_load"]  # [N * m^{-1}]
         return syy / (F / a)
 
-    # -----> Helper methods
+    # -----> Utility methods
+    def south_cells(self) -> np.ndarray:
+        """Get indices of cells that are adjacent to the South boundary"""
+        sd = self.mdg.subdomains()[0]
+        sides = self._domain_boundary_sides(sd)
+        south_idx = np.where(sides.south)[0]
+        return sd.signs_and_cells_of_boundary_faces(south_idx)[1]
+
+    def east_cells(self) -> np.ndarray:
+        """Get indices of cells that are adjacent to the East boundary"""
+        sd = self.mdg.subdomains()[0]
+        sides = self._domain_boundary_sides(sd)
+        east_idx = np.where(sides.east)[0]
+        return sd.signs_and_cells_of_boundary_faces(east_idx)[1]
 
     def xcut(self, array: np.ndarray, through_cells: bool) -> np.ndarray:
         """Perform a horizontal close to the south of the domain.
@@ -1079,7 +1157,7 @@ class Mandel(pp.ContactMechanicsBiot):
         if through_cells:
             cut_array = array[:nx]
         else:
-            cut_array = array[:nx+1]
+            cut_array = array[: nx + 1]
 
         return cut_array
 
@@ -1105,7 +1183,7 @@ class Mandel(pp.ContactMechanicsBiot):
         if through_cells:
             cut_array = array[: nx * ny : nx]
         else:
-            cut_array = array[(nx + 1) * ny + 9 * nx: (nx + 1) * ny + 10 * nx]
+            cut_array = array[(nx + 1) * ny + 0 * nx : (nx + 1) * ny + 1 * nx]
 
         return cut_array
 
@@ -1196,7 +1274,7 @@ class Mandel(pp.ContactMechanicsBiot):
             sd: PorePy grid.
             true_array: Exact array, e.g.: pressure, displacement, flux, or traction.
             approx_array: Approximated array, e.g.: pressure, displacement, flux, or traction.
-            is_cc: True for cell-centered quanitities (e.g., pressure and displacement)
+            is_cc: True for cell-centered quantities (e.g., pressure and displacement)
                 and False for face-centered quantities (e.g., flux and traction).
             is_scalar: True for scalar quantities (e.g., pressure or flux) and False for
                 vector quantities (displacement and traction).
@@ -1223,7 +1301,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         return l2_error
 
-    # Plotting
+    # -----> Plotting
     def plot_results(self):
         """Plot results"""
 
@@ -1233,33 +1311,40 @@ class Mandel(pp.ContactMechanicsBiot):
         fname_uy = "vertical_displacement"
         fname_qx = "horizontal_flux"
         fname_syy = "vertical_stress"
+        fname_consol = "degree_of_consolidation"
         extension = ".pdf"
         cmap = mcolors.ListedColormap(
             plt.cm.tab20.colors[: len(self.time_manager.schedule)]
         )
 
-        # Nondimensional pressure plot
-        self._plot_pressure(folder=folder, file_name=fname_p, file_extension=extension,
-                            color_map=cmap)
+        # Non-dimensional pressure
+        self._plot_pressure(
+            folder=folder, file_name=fname_p, file_extension=extension, color_map=cmap
+        )
 
-        # Nondimensional horizontal displacement
-        self._plot_horizontal_displacement(folder=folder, file_name=fname_ux,
-                                           file_extension=extension, color_map=cmap)
+        # Non-dimensional horizontal displacement
+        self._plot_horizontal_displacement(
+            folder=folder, file_name=fname_ux, file_extension=extension, color_map=cmap
+        )
 
-        # Mondimensional vertical displacement
-        self._plot_vertical_displacement(folder=folder, file_name=fname_uy,
-                                         file_extension=extension, color_map=cmap)
+        # Non-dimensional vertical displacement
+        self._plot_vertical_displacement(
+            folder=folder, file_name=fname_uy, file_extension=extension, color_map=cmap
+        )
 
-        # Nondimensional horizontal specific discharge
-        self._plot_horizontal_flux(folder=folder, file_name=fname_qx, file_extension=extension,
-                                   color_map=cmap)
+        # Non-dimensional horizontal Darcu flux
+        self._plot_horizontal_flux(
+            folder=folder, file_name=fname_qx, file_extension=extension, color_map=cmap
+        )
 
-        # Nondimensional vertical stress
+        # Non-dimensional vertical stress
         self._plot_vertical_stress(
-            folder=folder,
-            file_name=fname_syy,
-            file_extension=extension,
-            color_map=cmap
+            folder=folder, file_name=fname_syy, file_extension=extension, color_map=cmap
+        )
+
+        # Degrees of consolidation
+        self._plot_consolidation_degree(
+            folder=folder, file_name=fname_consol, file_extension=extension, color_map=cmap
         )
 
     def _plot_pressure(
@@ -1278,23 +1363,23 @@ class Mandel(pp.ContactMechanicsBiot):
             color_map: listed color map object.
 
         """
-        fig, ax = plt.subplots(figsize=(9, 8))
-
         sd = self.mdg.subdomains()[0]
         xc = sd.cell_centers[0]
+        south_cells = self.south_cells()
 
         a, _ = self.params["domain_size"]
         x_ex = np.linspace(0, a, 400)
 
+        fig, ax = plt.subplots(figsize=(9, 8))
         for idx, sol in enumerate(self.solutions):
             ax.plot(
-                self.nondim_x(x=x_ex),
-                self.nondim_p(self.exact_pressure(x=x_ex, t=sol.time)),
+                self.nondim_x(x_ex),
+                self.nondim_p(self.exact_pressure(x_ex, sol.time)),
                 color=color_map.colors[idx],
             )
             ax.plot(
-                self.xcut(self.nondim_x(xc), through_cells=True),
-                self.xcut(self.nondim_p(sol.num_pressure), through_cells=True),
+                self.nondim_x(xc[south_cells]),
+                self.nondim_p(sol.num_pressure[south_cells]),
                 color=color_map.colors[idx],
                 linewidth=0,
                 marker=".",
@@ -1309,10 +1394,9 @@ class Mandel(pp.ContactMechanicsBiot):
                 markersize=12,
                 label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
             )
-        ax.set_xlabel(r"$\tilde{x} = x/a$", fontsize=15)
-        ax.set_ylabel(r"$\tilde{p} = p/(F a)$", fontsize=15)
+        ax.set_xlabel(r"Non-dimensional horizontal distance, $x ~ a^{-1}$", fontsize=13)
+        ax.set_ylabel(r"Non-dimensional pressure, $p ~ a ~ F^{-1}$", fontsize=13)
         ax.legend(loc="center right", bbox_to_anchor=(1.4, 0.5), fontsize=13)
-        ax.set_title("Normalized pressure profiles", fontsize=16)
         ax.grid()
         plt.subplots_adjust(right=0.7)
         if not os.path.exists(folder):
@@ -1327,7 +1411,7 @@ class Mandel(pp.ContactMechanicsBiot):
         file_extension: str,
         color_map: mcolors.ListedColormap,
     ) -> None:
-        """Plot nondimensional horizontal displacement profiles.
+        """Plot non-dimensional horizontal displacement profiles.
 
         Parameters:
             folder: name of the folder to store the results e.g., "out/".
@@ -1338,22 +1422,21 @@ class Mandel(pp.ContactMechanicsBiot):
         """
         sd = self.mdg.subdomains()[0]
         xc = sd.cell_centers[0]
+        south_cells = self.south_cells()
 
-        a, b = self.params["domain_size"]
-        y_ex = np.linspace(0, b, 400)
+        a, _ = self.params["domain_size"]
         x_ex = np.linspace(0, a, 400)
 
-        # Horizontal displacement plot
         fig, ax = plt.subplots(figsize=(9, 8))
         for idx, sol in enumerate(self.solutions):
             ax.plot(
                 self.nondim_x(x_ex),
-                self.nondim_x(self.exact_displacement(x_ex, y_ex, sol.time)[0]),
+                self.nondim_x(self.exact_horizontal_displacement(x_ex, sol.time)),
                 color=color_map.colors[idx],
             )
             ax.plot(
-                self.xcut(self.nondim_x(xc), through_cells=True),
-                self.xcut(self.nondim_x(sol.num_displacement_x), through_cells=True),
+                self.nondim_x(xc[south_cells]),
+                self.nondim_x(sol.num_displacement_x[south_cells]),
                 color=color_map.colors[idx],
                 linewidth=0,
                 marker=".",
@@ -1368,10 +1451,11 @@ class Mandel(pp.ContactMechanicsBiot):
                 markersize=12,
                 label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
             )
-        ax.set_xlabel(r"$x/a$", fontsize=15)
-        ax.set_ylabel(r"$u_x/a$", fontsize=15)
+        ax.set_xlabel(r"Non-dimensional horizontal distance, $x ~ a^{-1}$", fontsize=13)
+        ax.set_ylabel(
+            r"Non-dimensional horizontal displacement, $u_x ~ a^{-1}$", fontsize=13
+        )
         ax.legend(loc="center right", bbox_to_anchor=(1.4, 0.5), fontsize=13)
-        ax.set_title("Normalized horizontal displacement profiles", fontsize=16)
         ax.grid()
         plt.subplots_adjust(right=0.7)
         if not os.path.exists(folder):
@@ -1386,7 +1470,7 @@ class Mandel(pp.ContactMechanicsBiot):
         file_extension: str,
         color_map: mcolors.ListedColormap,
     ) -> None:
-        """Plot nondimensional vertical displacement profiles.
+        """Plot non-dimensional vertical displacement profiles.
 
         Parameters:
             folder: name of the folder to store the results e.g., "out/".
@@ -1397,22 +1481,21 @@ class Mandel(pp.ContactMechanicsBiot):
         """
         sd = self.mdg.subdomains()[0]
         yc = sd.cell_centers[1]
+        east_cells = self.east_cells()
 
-        a, b = self.params["domain_size"]
+        _, b = self.params["domain_size"]
         y_ex = np.linspace(0, b, 400)
-        x_ex = np.linspace(0, a, 400)
 
-        # Vertical displacement plot
         fig, ax = plt.subplots(figsize=(9, 8))
         for idx, sol in enumerate(self.solutions):
             ax.plot(
                 self.nondim_y(y_ex),
-                self.nondim_y(self.exact_displacement(x_ex, y_ex, sol.time)[1]),
+                self.nondim_y(self.exact_vertical_displacement(y_ex, sol.time)),
                 color=color_map.colors[idx],
             )
             ax.plot(
-                self.ycut(self.nondim_y(yc), through_cells=True),
-                self.ycut(self.nondim_y(sol.num_displacement_y), through_cells=True),
+                self.nondim_y(yc[east_cells]),
+                self.nondim_y(sol.num_displacement_y[east_cells]),
                 color=color_map.colors[idx],
                 linewidth=0,
                 marker=".",
@@ -1427,10 +1510,11 @@ class Mandel(pp.ContactMechanicsBiot):
                 markersize=12,
                 label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
             )
-        ax.set_xlabel(r"$y/b$", fontsize=15)
-        ax.set_ylabel(r"$u_y/b$", fontsize=15)
+        ax.set_xlabel(r"Non-dimensional vertical distance, $y ~ b^{-1}$", fontsize=13)
+        ax.set_ylabel(
+            r"Non-dimensional vertical displacement, $u_y ~ b^{-1}$", fontsize=13
+        )
         ax.legend(loc="center right", bbox_to_anchor=(1.4, 0.5), fontsize=13)
-        ax.set_title("Normalized vertical displacement profiles", fontsize=16)
         ax.grid()
         plt.subplots_adjust(right=0.7)
         if not os.path.exists(folder):
@@ -1445,7 +1529,7 @@ class Mandel(pp.ContactMechanicsBiot):
         file_extension: str,
         color_map: mcolors.ListedColormap,
     ) -> None:
-        """Plot nondimensional horizontal flux profiles.
+        """Plot non-dimensional horizontal velocity profiles.
 
         Parameters:
             folder: name of the folder to store the results e.g., "out/".
@@ -1457,11 +1541,15 @@ class Mandel(pp.ContactMechanicsBiot):
         sd = self.mdg.subdomains()[0]
         xf = sd.face_centers[0]
         nx = sd.face_normals[0]
+        sides = self._domain_boundary_sides(sd)
+        south_cells = self.south_cells()
+        faces_of_south_cells = sps.find(sd.cell_faces.T[south_cells])[1]
+        south_faces = np.where(sides.south)[0]
+        int_faces_of_south_cells = np.setdiff1d(faces_of_south_cells, south_faces)
 
         a, _ = self.params["domain_size"]
         x_ex = np.linspace(0, a, 400)
 
-        # Flux plot
         fig, ax = plt.subplots(figsize=(9, 8))
         for idx, sol in enumerate(self.solutions):
             ax.plot(
@@ -1470,8 +1558,11 @@ class Mandel(pp.ContactMechanicsBiot):
                 color=color_map.colors[idx],
             )
             ax.plot(
-                self.xcut(self.nondim_x(xf), through_cells=False),
-                self.xcut(self.nondim_flux(sol.num_flux / nx), through_cells=False),
+                self.nondim_x(xf[int_faces_of_south_cells]),
+                self.nondim_flux(
+                    sol.num_flux[int_faces_of_south_cells]
+                    / nx[int_faces_of_south_cells]
+                ),
                 color=color_map.colors[idx],
                 linewidth=0,
                 marker=".",
@@ -1486,10 +1577,13 @@ class Mandel(pp.ContactMechanicsBiot):
                 markersize=12,
                 label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
             )
-        ax.set_xlabel(r"$\tilde{x} = x/a$", fontsize=15)
-        ax.set_ylabel(r"$\tilde{q}_x = q_x \, \mu_f \, a^2 \, / \,  F \, k)$", fontsize=15)
+        ax.set_xlabel(r"Non-dimensional horizontal distance, $x ~ a^{-1}$", fontsize=13)
+        ax.set_ylabel(
+            r"Non-dimensional horizontal flux, "
+            r"$q_x ~ \mu_f ~ a^2 ~ F^{-1} ~ k^{-1}$",
+            fontsize=13,
+        )
         ax.legend(loc="center right", bbox_to_anchor=(1.4, 0.5), fontsize=13)
-        ax.set_title("Nondimensional horizontal flux profiles", fontsize=16)
         ax.grid()
         plt.subplots_adjust(right=0.7)
         if not os.path.exists(folder):
@@ -1515,6 +1609,8 @@ class Mandel(pp.ContactMechanicsBiot):
         """
         sd = self.mdg.subdomains()[0]
         xf = sd.face_centers[0]
+        sides = self._domain_boundary_sides(sd, 1e-6)
+        south_faces = sides.south
         ny = sd.face_normals[1]
 
         a, b = self.params["domain_size"]
@@ -1529,10 +1625,9 @@ class Mandel(pp.ContactMechanicsBiot):
                 color=color_map.colors[idx],
             )
             ax.plot(
-                self.ycut(self.nondim_x(xf), through_cells=False),
-                self.ycut(
-                    self.nondim_stress(sol.num_traction[1::sd.dim] / ny),
-                    through_cells=False
+                self.nondim_x(xf[south_faces]),
+                self.nondim_stress(
+                    sol.num_traction[1 :: sd.dim][south_faces] / ny[south_faces]
                 ),
                 color=color_map.colors[idx],
                 linewidth=0,
@@ -1548,10 +1643,15 @@ class Mandel(pp.ContactMechanicsBiot):
                 markersize=12,
                 label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
             )
-        ax.set_xlabel(r"$\tilde{x} = x\,/\,a$", fontsize=15)
-        ax.set_ylabel(r"$\tilde{\sigma}_{yy} = \sigma_{yy}\, a\, / \,F$", fontsize=15)
+        ax.set_xlabel(
+            r"Non-dimensional horizontal distance, $ x ~ a^{-1}$", fontsize=13
+        )
+        ax.set_ylabel(
+            r"Non-dimensional vertical poroelastic stress,"
+            r" $\sigma_{yy} ~ a ~ F^{-1}$",
+            fontsize=13,
+        )
         ax.legend(loc="center right", bbox_to_anchor=(1.4, 0.5), fontsize=13)
-        ax.set_title("Nondimensional vertical stress profiles", fontsize=16)
         ax.grid()
         plt.subplots_adjust(right=0.7)
         if not os.path.exists(folder):
@@ -1559,7 +1659,65 @@ class Mandel(pp.ContactMechanicsBiot):
         plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
         plt.gcf().clear()
 
-#%% Runner
+    def _plot_consolidation_degree(self,
+        folder: str,
+        file_name: str,
+        file_extension: str,
+        color_map: mcolors.ListedColormap
+    ):
+        """Plot degree of consolidation as a function of time."""
+        # Retrieve data
+
+        a, _ = self.params["domain_size"]  # [m]
+        c_f = self.fluid_diffusivity()  # [m^2 * s^{-1}]
+        tau_init = 1e-3
+        tau_final = 1e1
+        t_ex_init = tau_init * a ** 2 / c_f
+        t_ex_final = tau_final * a ** 2 / c_f
+        ex_times = np.linspace(t_ex_init, t_ex_final, 300)
+        ex_consol_degree_x = np.array(
+            [self.exact_degree_of_consolidation(t)[0] for t in ex_times]
+        )
+        ex_consol_degree_y = np.array(
+            [self.exact_degree_of_consolidation(t)[1] for t in ex_times]
+        )
+
+        num_times = self.time_manager.schedule
+        num_consol_degree_x = np.array([sol.num_consol_degree[0] for sol in self.solutions])
+        num_consol_degree_y = np.array([sol.num_consol_degree[1] for sol in self.solutions])
+
+        fig, ax = plt.subplots(figsize=(9, 8))
+        ax.semilogx(
+            self.nondim_t(ex_times), ex_consol_degree_x, linewidth=2, alpha=0.5,
+            label="Exact horizontal"
+             )
+        ax.semilogx(
+            self.nondim_t(ex_times), ex_consol_degree_y, linewidth=2, alpha=0.5,
+            label="Exact vertical")
+        ax.semilogx(
+            self.nondim_t(num_times), num_consol_degree_x, marker="o", linewidth=0,
+                    markersize=6,
+                    alpha=0.6, label="Horizontal"
+        )
+        ax.semilogx(self.nondim_t(num_times), num_consol_degree_y, marker="s", linewidth=0,
+                    markersize=6,
+                    alpha=0.6, label="Vertical")
+        ax.set_xlabel(
+            r"Non-dimensional time, $t ~ c_f ~ a^{-2}$", fontsize=13
+        )
+        ax.set_ylabel(
+            r"Degree of consolidation,"
+            r" $U(t)$",
+            fontsize=13,
+        )
+        ax.grid()
+        ax.legend()
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
+        plt.gcf().clear()
+
+# %% Runner
 
 # Time manager object
 time_manager = pp.TimeManager(
@@ -1570,7 +1728,7 @@ time_manager = pp.TimeManager(
         120,
         300,
     ],  # [s]
-    dt_init=0.01,  # [s]
+    dt_init=2,  # [s]
     constant_dt=True,
 )
 # Create application's parameter dictionary
@@ -1587,15 +1745,15 @@ params = {
     "num_cells": (20, 20),
     "time_manager": time_manager,
     "plot_results": True,
-    "perturbation_factor": 1e-5,
-    "mesh_type": "cartesian",
-    # "mesh_size": 2.0,  # [m]
+    "perturbation_factor": 1e-6,
+    "mesh_type": "triangular",
+    "mesh_size": 1.0,  # [m]
 }
 # Run model
 setup = Mandel(params)
 pp.run_time_dependent_model(setup, params)
 
-#%% Plotting
+# %% Plotting
 sd = setup.mdg.subdomains()[0]
 data = setup.mdg.subdomain_data(sd)
 xc = sd.cell_centers[0]
@@ -1603,5 +1761,17 @@ yc = sd.cell_centers[1]
 t = setup.time_manager.time
 p_num = data[pp.STATE][setup.scalar_variable]
 p_ex = setup.exact_pressure(xc, t)
-pp.plot_grid(sd, p_num, plot_2d=True, title="Numerical pressure")
-pp.plot_grid(sd, p_ex, plot_2d=True, title="Exact pressure")
+# pp.plot_grid(sd, p_num, plot_2d=True, title="Numerical pressure")
+# pp.plot_grid(sd, p_ex, plot_2d=True, title="Exact pressure")
+
+# %% Checking
+num_T = setup.solutions[1].num_traction
+
+num_traction = setup.solutions[1].num_traction
+ex_traction = setup.solutions[1].ex_traction
+num_Tx = num_traction[::2]
+ex_Tx = ex_traction[::2]
+num_Ty = num_traction[1::2]
+ex_Ty = ex_traction[1::2]
+ex_mag_T = (ex_Tx**2 + ex_Ty**2) ** 0.5
+num_mag_T = (num_Tx**2 + num_Ty**2) ** 0.5
