@@ -1,0 +1,27 @@
+# On a push to develop (which will happen through a merge due to the GH setup), rebase the docs branch
+# on top of develop. This should be straightforward, since docs should always be downstream to develop
+# and the only difference between the branches should be in the docs folder (which develop does not have
+# but that docs does have).
+
+name: Update docs branch
+
+on:
+  push:
+    branches:
+      - develop
+  
+  jobs:
+    build:
+      runs-on: ubuntu-latest
+      
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+    # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+    - uses: actions/checkout@v3
+    
+    - name: Rebase docs on develop
+      run: |
+        git checkout docs
+        git rebase develop
+        
+        
