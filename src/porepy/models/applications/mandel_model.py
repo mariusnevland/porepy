@@ -29,16 +29,17 @@ Note:
 """
 from __future__ import annotations
 
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-import numpy as np
-import porepy as pp
 import os
+from dataclasses import dataclass
+from typing import Union
+
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
 import scipy.optimize as opt
 import scipy.sparse as sps
 
-from typing import Union
-from dataclasses import dataclass
+import porepy as pp
 
 
 @dataclass
@@ -1327,7 +1328,10 @@ class Mandel(pp.ContactMechanicsBiot):
 
         # Degrees of consolidation
         self._plot_consolidation_degree(
-            folder=folder, file_name=fname_consol, file_extension=extension, color_map=cmap
+            folder=folder,
+            file_name=fname_consol,
+            file_extension=extension,
+            color_map=cmap,
         )
 
     def _plot_pressure(
@@ -1642,11 +1646,12 @@ class Mandel(pp.ContactMechanicsBiot):
         plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
         plt.gcf().clear()
 
-    def _plot_consolidation_degree(self,
+    def _plot_consolidation_degree(
+        self,
         folder: str,
         file_name: str,
         file_extension: str,
-        color_map: mcolors.ListedColormap
+        color_map: mcolors.ListedColormap,
     ):
         """Plot degree of consolidation as a function of time."""
 
@@ -1660,7 +1665,7 @@ class Mandel(pp.ContactMechanicsBiot):
         tau_2 = 1e0
         tau_3 = 1e1
 
-        t = lambda tau: tau * a ** 2 / c_f
+        t = lambda tau: tau * a**2 / c_f
 
         interval_0 = np.linspace(t(tau_0), t(tau_1), 100)
         interval_1 = np.linspace(t(tau_1), t(tau_2), 100)
@@ -1668,12 +1673,18 @@ class Mandel(pp.ContactMechanicsBiot):
         ex_times = np.concatenate((interval_0, interval_1))
         ex_times = np.concatenate((ex_times, interval_2))
 
-        ex_consol_degree = np.array([self.exact_degree_of_consolidation(t) for t in ex_times])
+        ex_consol_degree = np.array(
+            [self.exact_degree_of_consolidation(t) for t in ex_times]
+        )
 
         # Numerical consolidation degrees
         num_times = self.time_manager.schedule
-        num_consol_degree_x = np.array([sol.num_consol_degree[0] for sol in self.solutions])
-        num_consol_degree_y = np.array([sol.num_consol_degree[1] for sol in self.solutions])
+        num_consol_degree_x = np.array(
+            [sol.num_consol_degree[0] for sol in self.solutions]
+        )
+        num_consol_degree_y = np.array(
+            [sol.num_consol_degree[1] for sol in self.solutions]
+        )
 
         fig, ax = plt.subplots(figsize=(9, 8))
         ax.semilogx(
@@ -1682,18 +1693,18 @@ class Mandel(pp.ContactMechanicsBiot):
             alpha=0.5,
             color="black",
             linewidth=2,
-            label="Exact"
-             )
+            label="Exact",
+        )
         ax.semilogx(
             self.nondim_t(num_times),
             num_consol_degree_x,
             marker="s",
             linewidth=0,
-            markerfacecolor='none',
+            markerfacecolor="none",
             markeredgewidth=2,
             color="blue",
             markersize=10,
-            label="Horizontal MPFA/MPSA-FV"
+            label="Horizontal MPFA/MPSA-FV",
         )
         ax.semilogx(
             self.nondim_t(num_times),
@@ -1703,13 +1714,11 @@ class Mandel(pp.ContactMechanicsBiot):
             linewidth=0,
             color="red",
             markersize=10,
-            label="Vertical MPFA/MPSA-FV")
-        ax.set_xlabel(
-            r"Non-dimensional time, $t ~ c_f ~ a^{-2}$", fontsize=13
+            label="Vertical MPFA/MPSA-FV",
         )
+        ax.set_xlabel(r"Non-dimensional time, $t ~ c_f ~ a^{-2}$", fontsize=13)
         ax.set_ylabel(
-            r"Degree of consolidation,"
-            r" $U(t)$",
+            r"Degree of consolidation," r" $U(t)$",
             fontsize=13,
         )
         ax.grid()
@@ -1718,6 +1727,7 @@ class Mandel(pp.ContactMechanicsBiot):
             os.makedirs(folder)
         plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
         plt.gcf().clear()
+
 
 # %% Runner
 
