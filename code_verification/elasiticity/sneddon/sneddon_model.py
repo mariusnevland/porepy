@@ -205,14 +205,24 @@ class BEM:
         """
         self.params = params
 
-    def get_bem_length(self, num_bem_segments: int | None = None) -> float:
-        """Compute the length of each BEM segment.
+    def get_crack_center(self) -> np.ndarray:
+        """Computes the global coordinates of the crack center.
 
-        We assume that the crack is uniformly partitioned.
+        We assume that the crack center coincides with the center of the domain.
+
+        Returns:
+            - Global coordinates of the crack center. Shape is (3, ).
+
+        """
+        lx, ly = self.params["domain_size"]  # [m]
+        return np.array([lx/2, ly/2, 0.0])
+
+    def get_bem_length(self, num_bem_segments: int | None = None) -> float:
+        """Compute length of BEM segments for a uniformly partitioned crack.
 
         Parameters:
-            num_bem_segments: Number of BEM segments. If not specified, we use the
-                number of elements given in ``self.params["num_bem_segments"]``.
+            num_bem_segments: Number of BEM segments. If not specified, the number of
+                BEM segments given in ``self.params["num_bem_segments"]`` will be used.
 
         Returns:
             Length of the BEM segment.
@@ -229,11 +239,11 @@ class BEM:
         """Compute the centers of the BEM segments.
 
         Parameters:
-            num_bem_segments: Number of BEM segments. If not specified, we use the
-                number of elements given in ``self.params["num_bem_segments"]``.
+            num_bem_segments: Number of BEM segments. If not specified, the number of
+                BEM segments given in ``self.params["num_bem_segments"]`` will be used.
 
         Returns:
-            Global coordinates of the BEM centers. Shape is (3, num_segments).
+            - Global coordinates of the BEM centers. Shape is (3, num_segments).
 
         """
         if num_bem_segments is None:
@@ -241,8 +251,8 @@ class BEM:
         else:
             n = num_bem_segments
 
-        cc = self.params["crack_center"]  # [m]
         b = self.params["crack_length"]  # [m]
+        cc = self.get_crack_center()  # [m]
         dl = self.get_bem_length(n)  # [m]
         beta = self.params["crack_angle"]  # [radians]
 
@@ -255,83 +265,116 @@ class BEM:
 
         return np.array([xc, yc, zc])
 
+    def get_distance_from_crack_center(self, points: np.ndarray) -> np.ndarray:
+        """Compute distance from a set of points to the fracture center.
+
+        Args:
+            points: coordinates of the set of points. Shape is (3, num_points).
+
+        Returns:
+            Distance from the set of point to the fracture center. Shape is
+                (num_points, ).
+
+        """
+        crack_center = self.get_crack_center()
+
+        return pp.distances.point_pointset(crack_center, points)
+
     def transform_coordinates(
         self,
         bem_center: np.ndarray,
-        points: np.ndarray,
+        points_in_global_coo: np.ndarray,
     ) -> np.ndarray:
-        """Transform coordinates of a set of points relative to a BEM center.
+        """Transform from global to local coordinates (relative to the BEM segment).
 
         Parameters:
-            bem_center: global coordinates of the bem segment center. Shape is (3, ).
-            points: global coordinates of a set of points. Shape is (3, num_points).
+            bem_center: global coordinates of the BEM segment center.
+                Shape is (3, ).
+            points_in_global_coo: global coordinates of the points.
+                Shape is (3, num_points).
 
         Returns:
-            Transformed coordinates for the given set of ``points`` relative to the
-                center of the BEM element. Shape is (3, num_points).
+            - Transformed coordinates for the given set of ``points`` .
+             Shape is (3, num_points).
 
         """
         beta = self.params["crack_angle"]  # [radians]
+        coo = points_in_global_coo  # [m]
 
-        x_bar = np.zeros_like(points)
-        x_bar[0] = (points[0] - bem_center[0]) * np.cos(beta) + (
-            points[1] - bem_center[1]
-        ) * np.sin(beta)
-        x_bar[1] = -(points[0] - bem_center[0]) * np.sin(beta) + (
-            points[1] - bem_center[1]
-        ) * np.cos(beta)
+        # fmt: off
+        x_bar = np.zeros_like(coo)
+        x_bar[0] = (
+                (coo[0] - bem_center[0]) * np.cos(beta)
+                + (coo[1] - bem_center[1]) * np.sin(beta)
+        )
+        x_bar[1] = (
+                -(coo[0] - bem_center[0]) * np.sin(beta)
+                + (coo[1] - bem_center[1]) * np.cos(beta)
+        )
+        # fmt: on
 
         return x_bar
 
     def bem_contribution_to_displacement(
         self,
         normal_relative_displacement: float,
-        points: np.ndarray,
+        points_in_local_coo: np.ndarray,
         num_bem_segments: int | None = None,
     ) -> np.ndarray:
-        """Displacements away from the crack approximated via BEM.
+        """Compute BEM segment contribution to the displacement outside the crack.
 
-        Note that the following solutions are valid for the case when the BEM segment
-        undergoes a *constant* relative displacement in the normal direction only.
-        That is, the solution assumes that zero tangential relative displacement.
+        Note that the expressions for the displacements outside the crack are
+        only valid for the case when a BEM segment undergoes a *constant* relative
+        displacement. In addition, for the pressurized crack problem, we further assume
+        zero tangential relative displacement.
 
         Parameters:
-            normal_relative_displacement : constant normal relative displacement
-                (in meters) that the BEM segment undergoes.
-            points : points in local coordinates relative to the crack center
-                at which the displacement will be approximated.
-            num_bem_segments : Number of BEM segments. If not specified, we use the
+            normal_relative_displacement: constant normal relative displacement
+                (in meters) that the BEM segment undergoes. In our setting, this will
+                typically correspond to the exact normal relative displacement obtained
+                via Sneddon's solution [1].
+            points_in_local_coo: points given in local coordinates (relative to the bem
+                segment) at which the displacement solution will be evaluated.
+            num_bem_segments: Number of BEM segments. If not specified, we use the
                 number of elements given in ``self.params["num_bem_segments"]``.
 
         Returns:
-            Approximate displacement at the given `points`.
+            Array of ``shape=(2 * num_points, )``. BEM contribution to the displacement
+            at the given `points`. The array is returned in flattened vector format.
 
         Notes:
             The expressions are given for `u_x` and `u_y` for an arbitrarily oriented
-              BEM segment of length `2a` (see Eq. 5.5.4 from [1]).
+            BEM segment of length `2a` (see Eq. 5.5.4 from [2]).
 
-            Note that for the pressurized crack problem, the displacement discontinuity
-              in the tangential direction is zero.
+            Recall that for the pressurized crack problem, the displacement
+            discontinuity in the tangential direction is zero.
 
             The expressions can therefore be written as:
 
-            u_x = D_ybar * [
+            u_x = D_n * [
                 - (1 - 2*nu) * cos(beta) * F2_bar
                 - 2 * (1 - nu) * sin(beta) * F3_bar
                 - y_bar * (cos(beta) * F4_bar + sin(beta) * F5_bar)
             ]
 
-            u_y = D_ybar * [
+            u_y = D_n * [
                 - (1 - 2 * nu) * sin(beta) * F2_bar
                 + 2 * (1 - nu) * cos(beta) * F3_bar
                 - y_bar * (sin(beta) * F4_bar - cos(beta) * F5_bar)
             ]
 
-            Here, D_ybar is the exact relative normal displacement given by Sneddon's
-              analytical solution, y_bar is the local vertical coordinate, beta is the
-              angle (in radians) measured with respect to the horizontal axis,
-              and F2_bar, F3_bar, F4_bar, and F5_bar are derivatives of the
-              `f(x,y)` function (see Section 5.5 of [1]).
+            Here, D_n is the constant relative normal displacement, y_bar is the
+            local vertical coordinate, beta is the angle (in radians) measured with
+            respect to the horizontal axis, and F2_bar, F3_bar, F4_bar, and F5_bar
+            are derivatives of the `f(x,y)` function (see Section 5.5 of [2]).
+
+        References:
+            [1] Sneddon, I.N.: Fourier Transforms. McGraw Hill Book Co, Inc.,
+              New York (1951).
+
+            [2] Crouch, S.L., Starfield, A.: Boundary Element Methods in Solid
+              Mechanics: With Applications in Rock Mechanics and Geological
+              Engineering. Allen & Unwin, London (1982).
 
         """
         if num_bem_segments is None:
@@ -339,77 +382,77 @@ class BEM:
         else:
             n = num_bem_segments
 
-        D_ybar = normal_relative_displacement  # [m]
+        D_n = normal_relative_displacement  # [m]
         beta = self.params["crack_angle"]  # [radians]
         nu = self.params["poisson_coefficient"]  # [-]
         dl = self.get_bem_length(num_bem_segments=n)  # [m]
         a = dl / 2  # half-length of the bem segment
-        xbar = points[0]
-        ybar = points[1]
+        coo = points_in_local_coo[0]
 
-        # Determine constant term that multiplies the expressions
-        c0: float = 1 / (4 * np.pi * (1 - nu))
+        # Constant term that multiplies the expressions
+        c0 = 1 / (4 * np.pi * (1 - nu))
 
         # Derivatives of f(xbar, ybar)
 
         # F2(xbar, ybar) = f_{xbar}
         F2_bar = c0 * (
-            np.log(np.sqrt((xbar - a) ** 2 + ybar**2))
-            - np.log(np.sqrt((xbar + a) ** 2 + ybar**2))
+            np.log(np.sqrt((coo[0] - a) ** 2 + coo[1] ** 2))
+            - np.log(np.sqrt((coo[0] + a) ** 2 + coo[1] ** 2))
         )
 
         # F3(x_bar, y_bar) = f_{y_bar}
-        F3_bar = -c0 * (np.arctan(ybar / (xbar - a)) - np.arctan(ybar / (xbar + a)))
+        F3_bar = -c0 * (
+            np.arctan(coo[1] / (coo[0] - a))
+            - np.arctan(coo[1] / (coo[0] + a))
+        )
 
         # F4(x_bar, y_bar) = f_{x_bar, y_bar}
         F4_bar = c0 * (
-            ybar / ((xbar - a) ** 2 + ybar**2) - ybar / ((xbar + a) ** 2 + ybar**2)
+                coo[1] / ((coo[0] - a) ** 2 + coo[1] ** 2)
+                - coo[1] / ((coo[0] + a) ** 2 + coo[1] ** 2)
         )
 
         # F5(x_bar, y_bar) = f_{x_bar, x_bar} = - f_{y_bar, y_bar}
         F5_bar = c0 * (
-            (xbar - a) / ((xbar - a) ** 2 + ybar**2)
-            - (xbar + a) / ((xbar + a) ** 2 + ybar**2)
+                (coo[0] - a) / ((coo[0] - a) ** 2 + coo[1] ** 2)
+                - (coo[0] + a) / ((coo[0] + a) ** 2 + coo[1] ** 2)
         )
 
         # Displacement in the global x-coordinate
-        u_x = D_ybar * (
-            -(1 - 2 * nu) * np.cos(beta) * F2_bar
-            - 2 * (1 - nu) * np.sin(beta) * F3_bar
-            - ybar * (np.cos(beta) * F4_bar + np.sin(beta) * F5_bar)
+        u_x = D_n * (
+                -(1 - 2 * nu) * np.cos(beta) * F2_bar
+                - 2 * (1 - nu) * np.sin(beta) * F3_bar
+                - coo[1] * (np.cos(beta) * F4_bar + np.sin(beta) * F5_bar)
         )
 
-        u_y = D_ybar * (
-            -(1 - 2 * nu) * np.sin(beta) * F2_bar
-            + 2 * (1 - nu) * np.cos(beta) * F3_bar
-            - ybar * (np.sin(beta) * F4_bar - np.cos(beta) * F5_bar)
+        u_y = D_n * (
+                -(1 - 2 * nu) * np.sin(beta) * F2_bar
+                + 2 * (1 - nu) * np.cos(beta) * F3_bar
+                - coo[1] * (np.sin(beta) * F4_bar - np.cos(beta) * F5_bar)
         )
 
         u = np.array([u_x, u_y]).ravel("F")
 
         return u
 
-    def distance_from_crack_center(self, point_set: np.ndarray) -> np.ndarray:
-        """Compute distance from a set of points to the fracture center.
+    def compute_displacement(
+        self,
+        points_in_global_coo: np.ndarray,
+        num_bem_segments: int | None = None,
+    ) -> np.ndarray:
+        """Compute (outside of crack) displacements at the given points using BEM.
 
-        Args:
-            point_set: coordinates of the set of points. Shape is (3, num_points).
+        Parameters:
+            points_in_global_coo (shape=(3, num_points )): Global coordinates of the
+                points at which the displacement will be computed.
+            num_bem_segments: Number of BEM segments. If not specified, we use the
+                number of elements given in ``self.params["num_bem_segments"]``.
 
         Returns:
-            Distance from the set of point to the fracture center. Shape is
-                (num_points, ).
+            ndarray (shape=(2 * num_points, )). Computed displacement at the given
+            ``points``. The array is returned in flattened vector format.
 
         """
-        crack_center = self.params["crack_center"]
-
-        return pp.distances.point_pointset(crack_center, point_set)
-
-    def far_field_displacement(
-        self,
-        points: np.ndarray,
-        num_bem_segments: int | None = None,
-    ):
-
         # Get number of bem segments used to discretize the crack
         if num_bem_segments is None:
             n = self.params["num_bem_segments"]
@@ -420,22 +463,27 @@ class BEM:
         bem_centers = self.get_bem_centers(n)
 
         # Compute distance from bem centers to the crack center
-        eta = self.distance_from_crack_center(bem_centers)
+        eta = self.get_distance_from_crack_center(bem_centers)
 
         # Get exact relative normal displacement for each bem segment
         u_n = self.exact_relative_normal_displacement(eta)
 
         # BEM loop
-        num_points = points.shape[1]
+        num_points = points_in_global_coo.shape[1]
         u = np.zeros(2 * num_points)
         for bem in range(n):
 
             # Transform coordinates relative to each bem center
-            xbar = self.transform_coordinates(bem_centers[:, bem], points)
+            points_in_local_coo = self.transform_coordinates(
+                bem_centers[:, bem],
+                points_in_global_coo
+            )
 
             # Get bem contribution to the displacement at the given set of points
             u_bem = self.bem_contribution_to_displacement(
-                normal_relative_displacement=u_n[bem], points=xbar, num_bem_segments=n
+                normal_relative_displacement=u_n[bem],
+                points_in_local_coo=points_in_local_coo,
+                num_bem_segments=n
             )
 
             # Add contribution
@@ -446,15 +494,13 @@ class BEM:
     def exact_relative_normal_displacement(self, eta: np.ndarray) -> np.ndarray:
         """Compute exact relative normal displacement.
 
-        Sneddon, I. (1952). Fourier transforms. Bull. Amer. Math. Soc, 58, 512-513.
-
         Parameters:
-            eta: array containing the distances from a set of points to the crack
-               center. Shape is (num_points, ). Typically, the set of points will
-               correspond to the global coordinates of the bem centers.
+            eta (shape=(num_points, )): array containing the distances from a set of
+                points on the line crack relative to the crack center.
 
         Returns:
-            Exact relative normal displacement for each ``eta``.
+            Array of ``shape=(num_points, )`` containing the exact relative normal
+            displacement for each ``eta``.
 
         """
         nu_s = self.params["poisson_coefficient"]  # [-]
@@ -468,15 +514,12 @@ class BEM:
 
         return u_n
 
-
     def bem_relative_normal_displacement(
         self, num_bem_segments: int | None = None
     ) -> np.ndarray:
-        """Numerical approximation of the relative normal displacements using BEM.
+        """Numerical approximation of the relative normal displacement using BEM.
 
-        This procedure follows Section 5.3 from Crouch, S.L., Starfield, A.: Boundary
-        Element Methods in Solid Mechanics: With Applications in Rock Mechanics and
-        Geological Engineering. Allen & Unwin, London (1982).
+        We follow the procedure given in Section 5.3 from [1].
 
         Parameters:
             num_bem_segments: Number of BEM segments used to generate the approximate
@@ -485,6 +528,9 @@ class BEM:
         Returns:
             Approximate relative normal displacement for the pressurized crack
             problem using the Boundary Element Method. Shape is (num_bem_segments, ).
+
+        References:
+
 
         """
         if num_bem_segments is None:
@@ -538,7 +584,7 @@ class SneddonSetup(pp.ContactMechanics):
         # Define default parameters
         default_params: list[tuple] = [
             ("domain_size", (50.0, 50.0)),  # [m]
-            ("crack_angle", 0 * np.pi),  # [radians]
+            ("crack_angle", 0),  # [radians]
             ("crack_length", 20.0),  # [m]
             ("crack_pressure", 1e-4),  # [GPa]
             ("poisson_coefficient", 0.25),  # [-]
@@ -559,6 +605,8 @@ class SneddonSetup(pp.ContactMechanics):
             raise ValueError("Model only valid when ad is used.")
 
         # Store other useful parameters
+
+        # Crack center
         lx, ly = self.params["domain_size"]
         self.params["crack_center"] = np.array([lx / 2, ly / 2, 0.0])
 
@@ -614,7 +662,7 @@ class SneddonSetup(pp.ContactMechanics):
         bc_faces = sides.all_bf
         bc_coo = sd_rock.face_centers[:, bc_faces]
 
-        u_bc = self.bem.far_field_displacement(bc_coo)
+        u_bc = self.bem.compute_displacement(bc_coo)
         bc_vals = np.zeros(sd_rock.dim * sd_rock.num_faces)
         bc_vals[::sd_rock.dim][bc_faces] = u_bc[::sd_rock.dim]
         bc_vals[1::sd_rock.dim][bc_faces] = u_bc[1::sd_rock.dim]
@@ -779,7 +827,7 @@ mdg = setup.mdg
 sd_rock = mdg.subdomains()[0]
 sd_frac = mdg.subdomains()[1]
 
-u_bem = setup.bem.far_field_displacement(sd_rock.cell_centers)
+u_bem = setup.bem.compute_displacement(sd_rock.cell_centers)
 
 #pp.plot_grid(sd_rock, u_bem[::2], plot_2d=True, title="u_bem_x", linewidth=0)
 #pp.plot_grid(sd_rock, u_bem[1::2], plot_2d=True, title="u_bem_y", linewidth=0)
