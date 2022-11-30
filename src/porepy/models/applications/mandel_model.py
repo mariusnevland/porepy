@@ -1,30 +1,28 @@
 """
-This module contains an implementation of Mandel's problem of poroelasticity. The problem is
-discretized using MPFA/MPSA-FV in space and backward Euler in time.
+This module contains an implementation of Mandel's problem of poroelasticity. The
+problem is discretized using MPFA/MPSA-FV in space and backward Euler in time.
 
-For futher details on Mandel's problem, see [1], [2], [3], [4]. For the implementational
-details, see [5].
+For further details on Mandel's problem, see [1 – 4]. For the implementation details,
+see [5].
 
-Note:
+References:
 
-    References:
+- [1] Mandel, J.: Consolidation des sols (étude mathématique). Geotechnique.
+  3(7), 287–299 (1953).
 
-    - [1] Mandel, J.: Consolidation des sols (étude mathématique). Geotechnique.
-      3(7), 287–299 (1953).
+- [2] Cheng, A.H.-D., Detournay, E.: A direct boundary element method for plane strain
+  poroelasticity. Int. J. Numer. Anal. Methods Geomech. 12(5), 551–572 (1988).
 
-    - [2] Cheng, A.H.-D., Detournay, E.: A direct boundary element method for plane strain
-      poroelasticity. Int. J. Numer. Anal. Methods Geomech. 12(5), 551–572 (1988).
+- [3] Abousleiman, Y., Cheng, A. D., Cui, L., Detournay, E., & Roegiers, J. C. (1996).
+  Mandel's problem revisited. Geotechnique, 46(2), 187-195.
 
-    - [3] Abousleiman, Y., Cheng, A. D., Cui, L., Detournay, E., & Roegiers, J. C. (1996).
-      Mandel's problem revisited. Geotechnique, 46(2), 187-195.
+- [4] Mikelić, A., Wang, B., & Wheeler, M. F. (2014). Numerical convergence study of
+  iterative coupling for coupled flow and geomechanics. Computational Geosciences,
+  18(3), 325-341.
 
-    - [4] Mikelić, A., Wang, B., & Wheeler, M. F. (2014). Numerical convergence study of
-      iterative coupling for coupled flow and geomechanics. Computational Geosciences,
-      18(3), 325-341.
-
-    - [5] Keilegavlen, E., Berge, R., Fumagalli, A. et al. PorePy: an open-source software for
-      simulation of multiphysics processes in fractured porous media. Comput Geosci 25,
-      243–265 (2021).
+- [5] Keilegavlen, E., Berge, R., Fumagalli, A. et al. PorePy: an open-source software
+  for simulation of multiphysics processes in fractured porous media. Comput Geosci 25,
+  243–265 (2021).
 
 """
 from __future__ import annotations
@@ -138,11 +136,11 @@ class Mandel(pp.ContactMechanicsBiot):
 
             # Run setup
             tic = time()
-            setup = Mandel({plot_results: True})
+            setup = Mandel({"plot_results": True})
             print("Simulation started...")
             pp.run_time_dependent_model(setup, setup.params)
             toc = time()
-            print(f"Simulation finished in {round(toc - tic)} seconds."
+            print(f"Simulation finished in {round(toc - tic)} seconds.")
 
     """
 
@@ -152,42 +150,39 @@ class Mandel(pp.ContactMechanicsBiot):
         Parameters:
             params: Dictionary containing mandatory and optional model parameters.
 
-                Default physical parameters were adapted from
+                Default physical parameters are takem from
                 https://link.springer.com/article/10.1007/s10596-013-9393-8.
 
                 Optional parameters are:
 
                 - 'alpha_biot' : Biot constant (int or float). Default is 1.0.
-                - 'domain_size' : Size of the domain (tuple of int or float). The first
-                  element of the tuple is the width and the second the height. Default is
-                  (100.0, 10.0).
-                - 'lambda_lame' : Lamé parameter in `Pa` (int or float). Default is 1.65e9.
-                - 'mesh_size' : Mesh size in `m` (int or float). Used only when
-                  `mesh_size = "triangular"`. Default is 2.0.
-                - 'mesh_type' : Type of mesh (str). Either "cartesian" or "triangular". The
-                  first is a perturbed Cartesian grid and the second an unstructured
-                  triangular mesh. Default is "cartesian".
-                - 'mu_lame' : Lamé parameter in `m` (int or float). Default is 1.475E9.
-                - 'number_of_roots' : Number of roots to approximate the exact solutions (int).
-                  Default is 200.
-                - 'num_cells' : Number of cells in horizontal and vertical directions
-                  (tuple of int). This parameter is used only when `mesh_type = "cartesian"`.
-                  Default is (50, 5).
-                - 'permeability' : Permeability in `m^2` (int or float). Default is 9.86e-14.
-                - 'pertubation_factor' : Perturbation factor (int or float). Used for
-                  perturbing the physical nodes of the mesh. This is necessary to avoid
-                  singular matrices with MPSA and the use of rollers on Cartesian grids.
-                  Default is 1e-6.
-                - 'plot_results' : Whether to plot the results (bool). The resulting plot is
-                  saved inside the `out` folder. Default is False.
-                - 'storativity' : Storativity in `Pa^-1` (int or float). Default is 6.0606e-11.
+                - 'domain_size' : Size of the domain in `m` (tuple of int or float).
+                  First element is the length and second the height.
+                  Default is (100.0, 10.0).
+                - 'lambda_lame' : Lamé parameter in `Pa` (int or float).
+                  Default is 1.65e9.
+                - 'mesh_size' : Mesh size in `m` (int or float). Default is 2.0.
+                - 'mu_lame' : Lamé parameter in `m` (int or float). Default is 2.475E9.
+                - 'number_of_roots' : Number of roots to approximate the exact
+                  solutions (int). Default is 200.
+                - 'permeability' : Permeability in `m^2` (int or float).
+                  Default is 9.869e-14.
+                - 'plot_results' : Whether to plot the results (bool). The resulting
+                  plot is saved inside the `out` folder. Default is False.
+                - 'storativity' : Storativity in `Pa^-1` (int or float).
+                  Default is 6.0606e-11.
                 - 'time_manager' : Time manager object (pp.TimeManager). Default is
-                  pp.TimeManager([0, 20, 100, 400, 1200, 3000], 10, constant_dt=True).
+                  pp.TimeManager(
+                        schedule=[0, 1e1, 5e1, 1e2, 1e3, 5e3, 8e3, 1e4, 2e4, 3e4, 5e4],
+                        dt_init=10,
+                        constant_dt=True,
+                  ).
                 - 'use_ad' : Whether to use ad (bool). Must be set to True. Otherwise,
                   an error will be raised. Default is True.
                 - 'vertical_load' : Applied vertical load in `N * m^-1` (int or float).
                   Default is 6e8.
-                - 'viscosity' : Fluid viscosity in `Pa * s` (int or float). Default is 1e-3.
+                - 'viscosity' : Fluid viscosity in `Pa * s` (int or float).
+                  Default is 1e-3.
 
         """
 
@@ -195,7 +190,7 @@ class Mandel(pp.ContactMechanicsBiot):
             """
             Set default parameters if a keyword is absent in the `params` dictionary.
 
-            Args:
+            Parameter:
                 keyword: Parameter keyword, e.g., "alpha_biot".
                 value: Value of `keyword`, e.g., 1.0.
 
@@ -204,22 +199,23 @@ class Mandel(pp.ContactMechanicsBiot):
                 params[keyword] = value
 
         # Default parameters
-        default_tm = pp.TimeManager([0, 20, 100, 400, 1200, 3000], 10, constant_dt=True)
+        default_tm = pp.TimeManager(
+            schedule=[0, 1e1, 5e1, 1e2, 1e3, 5e3, 8e3, 1e4, 2e4, 3e4, 5e4],
+            dt_init=10,
+            constant_dt=True,
+        )
 
         default_params: list[tuple] = [
             ("alpha_biot", 1.0),  # [-]
-            ("domain_size", (10.0, 100.0)),  # [m]
-            ("height", 1.0),  # [m]
+            ("domain_size", (100.0, 10.0)),  # [m]
             ("lambda_lame", 1.65e9),  # [Pa]
-            ("mesh_type", "cartesian"),
             ("mesh_size", 2.0),  # [m]
-            ("mu_lame", 1.475e9),  # [Pa]
+            ("mu_lame", 2.475e9),  # [Pa]
             ("number_of_roots", 200),
-            ("num_cells", (50, 5)),
-            ("permeability", 9.86e-14),  # [m^2]
-            ("perturbation_factor", 1e-6),
+            ("permeability", 9.869e-14),  # [m^2]
             ("plot_results", False),
             ("specific_weight", 9.943e3),  # [Pa * m^-1]
+            ("storativity", 6.0606e-11),  # [Pa^-1]
             ("time_manager", default_tm),  # all time-related variables must be in [s]
             ("use_ad", True),  # only `use_ad = True` is supported
             ("vertical_load", 6e8),  # [N * m^-1]
@@ -231,10 +227,6 @@ class Mandel(pp.ContactMechanicsBiot):
             set_default_params(key, val)
         super().__init__(params)
 
-        # Make sure the perturbation factor only affects Cartesian grids
-        if not self.params["mesh_type"] == "cartesian":
-            self.params["perturbation_factor"] = 1e-10
-
         # ad sanity check
         if not self.params["use_ad"]:
             raise ValueError("Model only valid when ad is used.")
@@ -243,43 +235,20 @@ class Mandel(pp.ContactMechanicsBiot):
         self.solutions: list[MandelSolution] = []
 
     def create_grid(self) -> None:
-        """Create a two-dimensional Cartesian grid."""
-        if self.params["mesh_type"] == "cartesian":
-            nx, ny = self.params["num_cells"]
-            lx, ly = self.params["domain_size"]
-            phys_dims = np.array([lx, ly])
-            n_cells = np.array([nx, ny])
-            self.box = pp.geometry.bounding_box.from_points(
-                np.array([[0, 0], phys_dims]).T
-            )
-            sd: pp.Grid = pp.CartGrid(n_cells, phys_dims)
-            sd.compute_geometry()
-
-            # Perturb nodes to avoid singular matrices with rollers and MPSA.
-            np.random.seed(42)  # this seed is fixed but completely arbitrary
-            perturbation_factor = self.params["perturbation_factor"]
-            perturbation = np.random.rand(sd.num_nodes) * perturbation_factor
-            sd.nodes[0] += perturbation
-            sd.nodes[1] += perturbation
-            sd.compute_geometry()
-            self.mdg = pp.meshing.subdomains_to_mdg([[sd]])
-
-        elif self.params["mesh_type"] == "triangular":
-            lx, ly = self.params["domain_size"]
-            mesh_size = self.params["mesh_size"]
-            self.box = {"xmin": 0.0, "xmax": lx, "ymin": 0.0, "ymax": ly}
-            network_2d = pp.FractureNetwork2d(None, None, self.box)
-            mesh_args = {"mesh_size_bound": mesh_size, "mesh_size_frac": mesh_size}
-            self.mdg = network_2d.mesh(mesh_args)
-
-        else:
-            raise NotImplementedError("Mesh type not supported.")
+        """Create a two-dimensional unstructured triangular grid."""
+        lx, ly = self.params["domain_size"]
+        mesh_size = self.params["mesh_size"]
+        self.box = {"xmin": 0.0, "xmax": lx, "ymin": 0.0, "ymax": ly}
+        network_2d = pp.FractureNetwork2d(None, None, self.box)
+        mesh_args = {"mesh_size_bound": mesh_size, "mesh_size_frac": mesh_size}
+        self.mdg = network_2d.mesh(mesh_args)
 
     def _initial_condition(self) -> None:
         """Set up initial conditions.
 
         Note:
-            Initial conditions are given by Eqs. (41) - (43) from 10.1007/s10596-013-9393-8.
+            Initial conditions are given by Eqs. (41) - (43) from
+            10.1007/s10596-013-9393-8.
 
         """
         super()._initial_condition()
@@ -313,8 +282,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         """
         # Define boundary regions
-        tol = self.params["perturbation_factor"]
-        sides = self._domain_boundary_sides(sd, tol)
+        sides = self._domain_boundary_sides(sd)
         east_bc = np.isin(sides.all_bf, np.where(sides.east)).nonzero()
 
         # All sides Neumann, except the East side which is Dirichlet
@@ -326,7 +294,7 @@ class Mandel(pp.ContactMechanicsBiot):
         return bc
 
     def _bc_type_mechanics(self, sd: pp.Grid) -> pp.BoundaryConditionVectorial:
-        """Define boundary condition types for the mechanics subproblem
+        """Define boundary condition types for the mechanics subproblem.
 
         Args:
             sd: Subdomain grid.
@@ -339,8 +307,7 @@ class Mandel(pp.ContactMechanicsBiot):
         super()._bc_type_mechanics(sd=sd)
 
         # Get boundary sides, retrieve data dict, and bc object
-        tol = self.params["perturbation_factor"]
-        sides = self._domain_boundary_sides(sd, tol)
+        sides = self._domain_boundary_sides(sd)
         data = self.mdg.subdomain_data(sd)
         bc = data[pp.PARAMETERS][self.mechanics_parameter_key]["bc"]
 
@@ -372,16 +339,14 @@ class Mandel(pp.ContactMechanicsBiot):
             bc_values (sd.dim * sd.num_faces): Containing the boundary condition values.
 
         """
-
         # Retrieve boundary sides
-        tol = self.params["perturbation_factor"] * 10
-        _, _, _, north, *_ = self._domain_boundary_sides(sd, tol=tol)
+        _, _, _, north, *_ = self._domain_boundary_sides(sd)
 
         # All zeros except vertical component of the north side
         sd = self.mdg.subdomains()[0]
 
         # Retrieve physical data
-        F = self.params["applied_load"]
+        F = self.params["vertical_load"]
         nu_u = self.undrained_poisson_coefficient()
         mu_s = self.params["mu_lame"]
 
@@ -396,9 +361,8 @@ class Mandel(pp.ContactMechanicsBiot):
         return bc_values
 
     def before_newton_loop(self) -> None:
-        """Update time for time-stepping technique and bc values."""
+        """Method to be called before entering the Newton loop."""
         super().before_newton_loop()
-
         # Update value of boundary conditions
         self.update_north_bc_values(self.time_manager.time)
 
@@ -413,13 +377,12 @@ class Mandel(pp.ContactMechanicsBiot):
             self.solutions.append(MandelSolution(self))
 
     def update_north_bc_values(self, t: Union[float, int]) -> None:
-        """
-        Updates boundary condition value at the north boundary of the domain.
+        """Update boundary condition value at the north boundary of the domain.
 
-        Args:
-            t: Time in seconds.
+        Parameters:
+            t: Time in `s`.
 
-        Note:
+        Notes:
             The key `bc_values` from data[pp.PARAMETERS][self.mechanics_parameter_key]
             will be updated accordingly.
 
@@ -429,8 +392,7 @@ class Mandel(pp.ContactMechanicsBiot):
         kw_m = self.mechanics_parameter_key
 
         # Retrieve exact vertical displacement at the north boundary
-        tol = self.params["perturbation_factor"]
-        sides = self._domain_boundary_sides(sd, tol)
+        sides = self._domain_boundary_sides(sd)
         yf_north = sd.face_centers[1][sides.north]
         uy_north = self.exact_vertical_displacement(yf_north, t)
 
@@ -444,7 +406,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
     # Physical parameters
     def _permeability(self, sd: pp.Grid) -> np.ndarray:
-        """Override permeability value [m^2]
+        """Override permeability value [m^2].
 
         Args:
             sd: Subdomain grid.
@@ -456,7 +418,7 @@ class Mandel(pp.ContactMechanicsBiot):
         return self.params["permeability"] * np.ones(sd.num_cells)
 
     def _stiffness_tensor(self, sd: pp.Grid) -> pp.FourthOrderTensor:
-        """Override stifness tensor.
+        """Override stiffness tensor.
 
         Args:
             sd: Subdomain grid.
@@ -470,13 +432,14 @@ class Mandel(pp.ContactMechanicsBiot):
         return pp.FourthOrderTensor(mu, lam)
 
     def _viscosity(self, sd: pp.Grid) -> np.ndarray:
-        """Override fluid viscosity values [Pa.s]
+        """Override fluid viscosity values [Pa * s].
 
         Args:
             sd: Subdomain grid.
 
         Returns:
-            Viscosity
+            Viscosity.
+
         """
         return self.params["viscosity"] * np.ones(sd.num_cells)
 
@@ -499,6 +462,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         Returns:
             Biot's coefficient.
+
         """
         return self.params["alpha_biot"] * np.ones(sd.num_cells)
 
@@ -606,21 +570,19 @@ class Mandel(pp.ContactMechanicsBiot):
         Approximate roots to f(x) = 0, where f(x) = tan(x) - ((1-nu)/(nu_u-nu)) x
 
         Note that we have to solve the above equation numerically to get all positive
-        solutions to the equation. Later, we will use them to compute the infinite series
-        associated with the exact solutions. Experience has shown that 200 roots are enough
-        to achieve accurate results.
+        solutions to the equation. Later, we will use them to compute the infinite
+        series associated with the exact solutions. Experience has shown that 200
+        roots are enough to achieve accurate results.
 
-        Implementation note:
-            We find the roots using the bisection method. Thanks to Manuel Borregales who
-            helped with the implementation of this part of the code.I have no idea what was
-            the rationale behind the parameter tuning of the `bisect` method, but it seems
-            to give good results.
+        We find the roots using the bisection method. Thanks to Manuel Borregales
+        who helped with the implementation of this part of the code. I have no
+        idea what was the rationale behind the parameter tuning of the `bisect`
+        method, but it seems to give good results.
 
         Returns:
             a_n: approximated roots of f(x) = 0.
 
         """
-
         # Retrieve physical data
         nu_s = self.poisson_coefficient()
         nu_u = self.undrained_poisson_coefficient()
@@ -649,7 +611,7 @@ class Mandel(pp.ContactMechanicsBiot):
         """
         Exact pressure solution for a given time `t`.
 
-        Args:
+        Parameters:
             x: Points in the horizontal axis.
             t: Time in seconds.
 
@@ -658,7 +620,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         """
         # Retrieve data
-        F = self.params["applied_load"]
+        F = self.params["vertical_load"]
         B = self.skempton_coefficient()
         nu_u = self.undrained_poisson_coefficient()
         c_f = self.fluid_diffusivity()
@@ -690,7 +652,7 @@ class Mandel(pp.ContactMechanicsBiot):
         """
         Exact horizontal displacement for a given time ``t``.
 
-        Args:
+        Parameters:
             x: Points in the horizontal axis in `m`.
             t: Time in `s`
 
@@ -699,7 +661,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         """
         # Retrieve physical data
-        F = self.params["applied_load"]
+        F = self.params["vertical_load"]
         nu_s = self.poisson_coefficient()
         nu_u = self.undrained_poisson_coefficient()
         mu_s = self.params["mu_lame"]
@@ -739,7 +701,7 @@ class Mandel(pp.ContactMechanicsBiot):
         """
         Exact vertical displacement for a given time ``t``.
 
-        Args:
+        Parameters:
             y: Points in the horizontal axis in `m`.
             t: Time in `s`
 
@@ -748,7 +710,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         """
         # Retrieve physical data
-        F = self.params["applied_load"]
+        F = self.params["vertical_load"]
         nu_s = self.poisson_coefficient()
         nu_u = self.undrained_poisson_coefficient()
         mu_s = self.params["mu_lame"]
@@ -791,7 +753,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         """
         # Retrieve physical data
-        F = self.params["applied_load"]
+        F = self.params["vertical_load"]
         B = self.skempton_coefficient()
         k = self.params["permeability"]
         mu_f = self.params["viscosity"]
@@ -843,7 +805,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         """
         # Retrieve physical data
-        F = self.params["applied_load"]
+        F = self.params["vertical_load"]
         nu_s = self.poisson_coefficient()
         nu_u = self.undrained_poisson_coefficient()
         c_f = self.fluid_diffusivity()
@@ -934,7 +896,8 @@ class Mandel(pp.ContactMechanicsBiot):
         """Compute numerical flux.
 
         Returns:
-            Darcy fluxes at the face centers in `m^3 * s^{-1}`. Shape is (sd.num_faces, ).
+            Darcy fluxes at the face centers in `m^3 * s^{-1}`.
+            Shape is (sd.num_faces, ).
 
         """
         sd = self.mdg.subdomains()[0]
@@ -1119,70 +1082,18 @@ class Mandel(pp.ContactMechanicsBiot):
         east_idx = np.where(sides.east)[0]
         return sd.signs_and_cells_of_boundary_faces(east_idx)[1]
 
-    def xcut(self, array: np.ndarray, through_cells: bool) -> np.ndarray:
-        """Perform a horizontal close to the south of the domain.
-
-        Parameters:
-            array: Array to be cut. Shape is (sd.num_cells, ).
-            through_cells: True if the cut should pick cell-center quantities. False if the
-                cut should pick face-center quantities.
-
-        Returns:
-            Horizontally cut array from (0, dy) to (a, dy), where dy = cell size / 2.
-
-        Raises:
-            NotImplementedError if the mesh type is not Cartesian.
-
-        """
-        if not self.params["mesh_type"] == "cartesian":
-            raise NotImplementedError("Method only available for Cartesian grids.")
-
-        nx, _ = self.params["num_cells"]
-        if through_cells:
-            cut_array = array[:nx]
-        else:
-            cut_array = array[: nx + 1]
-
-        return cut_array
-
-    def ycut(self, array: np.ndarray, through_cells: bool) -> np.ndarray:
-        """Perform a vertical cut close to the west side of the domain.
-
-        Parameters:
-            array: Array to be cut. Shape is (sd.num_cells, ).
-            through_cells: True if the cut should pick cell-center quantities. False if the
-                cut should pick face-center quantities.
-
-        Returns:
-            Vertically cut array from (dx, 0) to (dx, b), where dx =  cell size / 2.
-
-        Raises:
-            NotImplementedError if the mesh type is not Cartesian.
-
-        """
-        if not self.params["mesh_type"] == "cartesian":
-            raise NotImplementedError("Method only available for Cartesian grids.")
-
-        nx, ny = self.params["num_cells"]
-        if through_cells:
-            cut_array = array[: nx * ny : nx]
-        else:
-            cut_array = array[(nx + 1) * ny + 0 * nx : (nx + 1) * ny + 1 * nx]
-
-        return cut_array
-
     def velocity_to_flux(
         self,
         velocity: list[np.ndarray, np.ndarray],
     ) -> np.ndarray:
         """Convert a velocity field into (integrated normal) fluxes.
 
-        The usual application is to compute (integrated normal) Darcy fluxes form specific
-        discharge.
+        The usual application is to compute (integrated normal) Darcy fluxes form
+        specific discharge.
 
         Parameters:
-            velocity: list of arrays in `m * s^{-1}`. Expected shape of each item on the list
-                is (sd.num_faces, ).
+            velocity: list of arrays in `m * s^{-1}`. Expected shape of each item on
+                the list is (sd.num_faces, ).
 
         Returns:
             Integrated normal fluxes `m^3 * s^{-1}` on the face centers of the grid.
@@ -1205,8 +1116,8 @@ class Mandel(pp.ContactMechanicsBiot):
         """Convert a stress field into (integrated normal) traction forces.
 
         Parameters:
-            stress: list of lists of arrays in `Pa`. Expected shape for each item of the
-                list is (sd.num_faces, ).
+            stress: list of lists of arrays in `Pa`. Expected shape for each item of
+                the list is (sd.num_faces, ).
 
         Returns:
             List of integrated traction forces `N` on the face centers of the grids.
@@ -1252,16 +1163,18 @@ class Mandel(pp.ContactMechanicsBiot):
         """Compute the error measured in the discrete (relative) L2-norm.
 
         The employed norms correspond respectively to equations (75) and (76) for the
-        displacement and pressure from https://epubs.siam.org/doi/pdf/10.1137/15M1014280.
+        displacement and pressure from
+        https://epubs.siam.org/doi/pdf/10.1137/15M1014280.
 
-        Args:
+        Parameters:
             sd: PorePy grid.
             true_array: Exact array, e.g.: pressure, displacement, flux, or traction.
-            approx_array: Approximated array, e.g.: pressure, displacement, flux, or traction.
+            approx_array: Approximated array, e.g.: pressure, displacement, flux, or
+                traction.
             is_cc: True for cell-centered quantities (e.g., pressure and displacement)
                 and False for face-centered quantities (e.g., flux and traction).
-            is_scalar: True for scalar quantities (e.g., pressure or flux) and False for
-                vector quantities (displacement and traction).
+            is_scalar: True for scalar quantities (e.g., pressure or flux) and False
+                for vector quantities (displacement and traction).
 
         Returns:
             l2_error: discrete L2-error of the quantity of interest.
@@ -1379,7 +1292,7 @@ class Mandel(pp.ContactMechanicsBiot):
                 linewidth=0,
                 marker="s",
                 markersize=12,
-                label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
+                label=rf"$\tau=${round(self.nondim_t(sol.time), 5)}",
             )
         ax.set_xlabel(r"Non-dimensional horizontal distance, $x ~ a^{-1}$", fontsize=13)
         ax.set_ylabel(r"Non-dimensional pressure, $p ~ a ~ F^{-1}$", fontsize=13)
@@ -1436,7 +1349,7 @@ class Mandel(pp.ContactMechanicsBiot):
                 linewidth=0,
                 marker="s",
                 markersize=12,
-                label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
+                label=rf"$\tau=${round(self.nondim_t(sol.time), 5)}",
             )
         ax.set_xlabel(r"Non-dimensional horizontal distance, $x ~ a^{-1}$", fontsize=13)
         ax.set_ylabel(
@@ -1495,7 +1408,7 @@ class Mandel(pp.ContactMechanicsBiot):
                 linewidth=0,
                 marker="s",
                 markersize=12,
-                label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
+                label=rf"$\tau=${round(self.nondim_t(sol.time), 5)}",
             )
         ax.set_xlabel(r"Non-dimensional vertical distance, $y ~ b^{-1}$", fontsize=13)
         ax.set_ylabel(
@@ -1562,7 +1475,7 @@ class Mandel(pp.ContactMechanicsBiot):
                 linewidth=0,
                 marker="s",
                 markersize=12,
-                label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
+                label=rf"$\tau=${round(self.nondim_t(sol.time), 5)}",
             )
         ax.set_xlabel(r"Non-dimensional horizontal distance, $x ~ a^{-1}$", fontsize=13)
         ax.set_ylabel(
@@ -1628,7 +1541,7 @@ class Mandel(pp.ContactMechanicsBiot):
                 linewidth=0,
                 marker="s",
                 markersize=12,
-                label=rf"$\tau=${round(self.nondim_t(sol.time), 3)}",
+                label=rf"$\tau=${round(self.nondim_t(sol.time), 5)}",
             )
         ax.set_xlabel(
             r"Non-dimensional horizontal distance, $ x ~ a^{-1}$", fontsize=13
@@ -1731,59 +1644,14 @@ class Mandel(pp.ContactMechanicsBiot):
 
 # %% Runner
 
-# Time manager object
-time_manager = pp.TimeManager(
-    schedule=[
-        0,
-        10,
-        50,
-        120,
-        300,
-    ],  # [s]
-    dt_init=2,  # [s]
-    constant_dt=True,
-)
-# Create application's parameter dictionary
-params = {
-    "use_ad": True,
-    "mu_lame": 2.475e9,  # [Pa]
-    "lambda_lame": 1.650e9,  # [Pa]
-    "permeability": 9.869e-14,  # [m^2]
-    "alpha_biot": 1.0,  # [-]
-    "viscosity": 1e-3,  # [Pa.s]
-    "storativity": 6.0606e-11,  # [1/Pa]
-    "applied_load": 6e8,  # [N/m]
-    "domain_size": (10.0, 10.0),  # [m]
-    "num_cells": (20, 20),
-    "time_manager": time_manager,
-    "plot_results": True,
-    "perturbation_factor": 1e-6,
-    "mesh_type": "triangular",
-    "mesh_size": 1.0,  # [m]
-}
-# Run model
-setup = Mandel(params)
-pp.run_time_dependent_model(setup, params)
+# Import modules
+import porepy as pp
+from time import time
 
-# %% Plotting
-sd = setup.mdg.subdomains()[0]
-data = setup.mdg.subdomain_data(sd)
-xc = sd.cell_centers[0]
-yc = sd.cell_centers[1]
-t = setup.time_manager.time
-p_num = data[pp.STATE][setup.scalar_variable]
-p_ex = setup.exact_pressure(xc, t)
-# pp.plot_grid(sd, p_num, plot_2d=True, title="Numerical pressure")
-# pp.plot_grid(sd, p_ex, plot_2d=True, title="Exact pressure")
-
-# %% Checking
-num_T = setup.solutions[1].num_traction
-
-num_traction = setup.solutions[1].num_traction
-ex_traction = setup.solutions[1].ex_traction
-num_Tx = num_traction[::2]
-ex_Tx = ex_traction[::2]
-num_Ty = num_traction[1::2]
-ex_Ty = ex_traction[1::2]
-ex_mag_T = (ex_Tx**2 + ex_Ty**2) ** 0.5
-num_mag_T = (num_Tx**2 + num_Ty**2) ** 0.5
+# Run setup
+tic = time()
+setup = Mandel({"plot_results": True})
+print("Simulation started...")
+pp.run_time_dependent_model(setup, setup.params)
+toc = time()
+print(f"Simulation finished in {round(toc - tic)} seconds.")
