@@ -1640,18 +1640,3 @@ class Mandel(pp.ContactMechanicsBiot):
             os.makedirs(folder)
         plt.savefig(folder + file_name + file_extension, bbox_inches="tight")
         plt.gcf().clear()
-
-
-# %% Runner
-
-# Import modules
-import porepy as pp
-from time import time
-
-# Run setup
-tic = time()
-setup = Mandel({"plot_results": True})
-print("Simulation started...")
-pp.run_time_dependent_model(setup, setup.params)
-toc = time()
-print(f"Simulation finished in {round(toc - tic)} seconds.")
