@@ -2,8 +2,8 @@
 This module contains an implementation of Mandel's problem of poroelasticity. The
 problem is discretized using MPFA/MPSA-FV in space and backward Euler in time.
 
-For further details on Mandel's problem, see [1 – 4]. For the implementation details,
-see [5].
+For further details on Mandel's problem, see [1 – 5]. For the implementation details,
+see [6].
 
 References:
 
@@ -20,7 +20,11 @@ References:
   iterative coupling for coupled flow and geomechanics. Computational Geosciences,
   18(3), 325-341.
 
-- [5] Keilegavlen, E., Berge, R., Fumagalli, A. et al. PorePy: an open-source software
+- [5] Borregales, M., Kumar, K., Radu, F. A., Rodrigo, C., & Gaspar, F. J. (2019). A partially
+  parallel-in-time fixed-stress splitting method for Biot’s consolidation model. Computers
+  & Mathematics with Applications, 77(6), 1466-1478.
+
+- [6] Keilegavlen, E., Berge, R., Fumagalli, A. et al. PorePy: an open-source software
   for simulation of multiphysics processes in fractured porous media. Comput Geosci 25,
   243–265 (2021).
 
@@ -190,7 +194,7 @@ class Mandel(pp.ContactMechanicsBiot):
             """
             Set default parameters if a keyword is absent in the `params` dictionary.
 
-            Parameter:
+            Parameters:
                 keyword: Parameter keyword, e.g., "alpha_biot".
                 value: Value of `keyword`, e.g., 1.0.
 
@@ -214,7 +218,6 @@ class Mandel(pp.ContactMechanicsBiot):
             ("number_of_roots", 200),
             ("permeability", 9.869e-14),  # [m^2]
             ("plot_results", False),
-            ("specific_weight", 9.943e3),  # [Pa * m^-1]
             ("storativity", 6.0606e-11),  # [Pa^-1]
             ("time_manager", default_tm),  # all time-related variables must be in [s]
             ("use_ad", True),  # only `use_ad = True` is supported
@@ -274,11 +277,11 @@ class Mandel(pp.ContactMechanicsBiot):
     def _bc_type_scalar(self, sd: pp.Grid) -> pp.BoundaryCondition:
         """Define boundary condition types for the flow subproblem.
 
-        Args:
+        Parameters:
             sd: Subdomain grid.
 
         Returns:
-            bc: Scalar boundary condition representation.
+            Scalar boundary condition representation.
 
         """
         # Define boundary regions
@@ -296,11 +299,11 @@ class Mandel(pp.ContactMechanicsBiot):
     def _bc_type_mechanics(self, sd: pp.Grid) -> pp.BoundaryConditionVectorial:
         """Define boundary condition types for the mechanics subproblem.
 
-        Args:
+        Parameters:
             sd: Subdomain grid.
 
         Returns:
-            bc: Vectorial boundary condition representation.
+            Vectorial boundary condition representation.
 
         """
         # Inherit bc from parent class. This sets all bc faces as Dirichlet.
@@ -332,11 +335,11 @@ class Mandel(pp.ContactMechanicsBiot):
     def _bc_values_mechanics(self, sd: pp.Grid) -> np.ndarray:
         """Set boundary condition values for the mechanics subproblem.
 
-        Args:
+        Parameters:
             sd: Subdomain grid.
 
         Returns:
-            bc_values (sd.dim * sd.num_faces): Containing the boundary condition values.
+            Boundary condition values of ``shape=(sd.dim * sd.num_faces, )``.
 
         """
         # Retrieve boundary sides
@@ -408,7 +411,7 @@ class Mandel(pp.ContactMechanicsBiot):
     def _permeability(self, sd: pp.Grid) -> np.ndarray:
         """Override permeability value [m^2].
 
-        Args:
+        Parameters:
             sd: Subdomain grid.
 
         Returns:
@@ -420,7 +423,7 @@ class Mandel(pp.ContactMechanicsBiot):
     def _stiffness_tensor(self, sd: pp.Grid) -> pp.FourthOrderTensor:
         """Override stiffness tensor.
 
-        Args:
+        Parameters:
             sd: Subdomain grid.
 
         Returns:
@@ -434,7 +437,7 @@ class Mandel(pp.ContactMechanicsBiot):
     def _viscosity(self, sd: pp.Grid) -> np.ndarray:
         """Override fluid viscosity values [Pa * s].
 
-        Args:
+        Parameters:
             sd: Subdomain grid.
 
         Returns:
@@ -444,20 +447,21 @@ class Mandel(pp.ContactMechanicsBiot):
         return self.params["viscosity"] * np.ones(sd.num_cells)
 
     def _storativity(self, sd: pp.Grid) -> np.ndarray:
-        """Override storativity value of the porous medium [1/Pa]
+        """Override storativity value of the porous medium [1/Pa].
 
-        Args:
+        Parameters:
             sd: Subdomain grid.
 
-        Retunrs:
-            Storativity
+        Returns:
+            Storativity.
+
         """
         return self.params["storativity"] * np.ones(sd.num_cells)
 
     def _biot_alpha(self, sd: pp.Grid) -> np.ndarray:
-        """Override value of Biot-Willis coefficient.
+        """Override value of Biot-Willis coefficient [-].
 
-        Args:
+        Parameters:
             sd: Subdomain grid.
 
         Returns:
@@ -470,7 +474,7 @@ class Mandel(pp.ContactMechanicsBiot):
         """Set bulk modulus [Pa].
 
         Returns:
-            K_s: Bulk modulus.
+            Bulk modulus.
 
         """
         mu_s = self.params["mu_lame"]
@@ -480,10 +484,10 @@ class Mandel(pp.ContactMechanicsBiot):
         return K_s
 
     def young_modulus(self) -> float:
-        """Set Young modulus [Pa]
+        """Set Young modulus [Pa].
 
         Returns:
-            E_s: Young modulus.
+            Young modulus.
 
         """
         mu_s = self.params["mu_lame"]
@@ -496,7 +500,7 @@ class Mandel(pp.ContactMechanicsBiot):
         """Set Poisson coefficient [-]
 
         Returns:
-            nu_s: Poisson coefficient.
+            Poisson coefficient.
 
         """
         mu_s = self.params["mu_lame"]
@@ -506,10 +510,10 @@ class Mandel(pp.ContactMechanicsBiot):
         return nu_s
 
     def undrained_bulk_modulus(self) -> float:
-        """Set undrained bulk modulus [Pa]
+        """Set undrained bulk modulus [Pa].
 
         Returns:
-            K_u: Undrained bulk modulus.
+            Undrained bulk modulus.
 
         """
         alpha_biot = self.params["alpha_biot"]
@@ -520,10 +524,10 @@ class Mandel(pp.ContactMechanicsBiot):
         return K_u
 
     def skempton_coefficient(self) -> float:
-        """Set Skempton's coefficient [-]
+        """Set Skempton's coefficient [-].
 
         Returns:
-            B: Skempton's coefficent.
+            Skempton's coefficent.
 
         """
         alpha_biot = self.params["alpha_biot"]
@@ -534,10 +538,13 @@ class Mandel(pp.ContactMechanicsBiot):
         return B
 
     def undrained_poisson_coefficient(self) -> float:
-        """Set Poisson coefficient under undrained conditions [-]
+        """Set Poisson coefficient under undrained conditions [-].
 
         Returns:
-            nu_u: Undrained Poisson coefficient.
+            Undrained Poisson coefficient.
+
+        Notes:
+            Expression taken from https://doi.org/10.1016/j.camwa.2018.09.005.
 
         """
         nu_s = self.poisson_coefficient()
@@ -547,10 +554,10 @@ class Mandel(pp.ContactMechanicsBiot):
         return nu_u
 
     def fluid_diffusivity(self) -> float:
-        """Set fluid diffusivity [m^2/s]
+        """Set fluid diffusivity [m^2/s].
 
         Returns:
-            c_f: Fluid diffusivity.
+            Fluid diffusivity.
 
         """
         k_s = self.params["permeability"]
@@ -562,6 +569,7 @@ class Mandel(pp.ContactMechanicsBiot):
         c_f = (2 * k_s * (B**2) * mu_s * (1 - nu_s) * (1 + nu_u) ** 2) / (
             9 * mu_f * (1 - nu_u) * (nu_u - nu_s)
         )
+
         return c_f
 
     # -----> Methods related to exact solutions
@@ -580,7 +588,7 @@ class Mandel(pp.ContactMechanicsBiot):
         method, but it seems to give good results.
 
         Returns:
-            a_n: approximated roots of f(x) = 0.
+            Approximated roots of `f(x) = 0` with ``shape=(num_roots, )``.
 
         """
         # Retrieve physical data
@@ -608,15 +616,14 @@ class Mandel(pp.ContactMechanicsBiot):
         return a_n
 
     def exact_pressure(self, x: np.ndarray, t: Union[float, int]) -> np.ndarray:
-        """
-        Exact pressure solution for a given time `t`.
+        """Exact pressure solution for a given time `t`.
 
         Parameters:
             x: Points in the horizontal axis.
             t: Time in seconds.
 
         Returns:
-            p (sd.num_cells, ): Exact pressure solution.
+            Exact pressure solution with ``shape=(np, )``.
 
         """
         # Retrieve data
@@ -649,15 +656,14 @@ class Mandel(pp.ContactMechanicsBiot):
     def exact_horizontal_displacement(
         self, x: np.ndarray, t: Union[int, float]
     ) -> np.ndarray:
-        """
-        Exact horizontal displacement for a given time ``t``.
+        """Exact horizontal displacement for a given time ``t``.
 
         Parameters:
             x: Points in the horizontal axis in `m`.
             t: Time in `s`
 
         Returns:
-            Exact displacement in the horizontal direction.
+            Exact displacement in the horizontal direction with ``shape=(np, )``.
 
         """
         # Retrieve physical data
@@ -698,15 +704,14 @@ class Mandel(pp.ContactMechanicsBiot):
     def exact_vertical_displacement(
         self, y: np.ndarray, t: Union[int, float]
     ) -> np.ndarray:
-        """
-        Exact vertical displacement for a given time ``t``.
+        """Exact vertical displacement for a given time ``t``.
 
         Parameters:
             y: Points in the horizontal axis in `m`.
             t: Time in `s`
 
         Returns:
-            Exact displacement in the vertical direction.
+            Exact displacement in the vertical direction with ``shape=(np, )``.
 
         """
         # Retrieve physical data
@@ -743,13 +748,13 @@ class Mandel(pp.ContactMechanicsBiot):
 
         For Mandel's problem, only the horizontal component in non-zero.
 
-        Args:
+        Parameters:
             x: Points in the horizontal axis in `m`.
             t: Time in `s`.
 
         Returns:
-            List of exact velocities for the given time ``t``. Each item of the list has a
-                size of sd.num_faces.
+            List of exact velocities for the given time ``t``. Each item of the list has
+             ``shape=(np, )``.
 
         """
         # Retrieve physical data
@@ -801,7 +806,7 @@ class Mandel(pp.ContactMechanicsBiot):
 
         Returns:
             List of lists of arrays, representing the components of the exact symmetric
-                stress tensor. Each item of the inner lists has size sd.num_faces.
+                stress tensor. Each item of the inner lists has ``shape=(np, )``.
 
         """
         # Retrieve physical data
@@ -896,8 +901,8 @@ class Mandel(pp.ContactMechanicsBiot):
         """Compute numerical flux.
 
         Returns:
-            Darcy fluxes at the face centers in `m^3 * s^{-1}`.
-            Shape is (sd.num_faces, ).
+            Darcy fluxes at the face centers in `m^3 * s^{-1}` with
+            ``shape=(sd.num_faces, )``.
 
         """
         sd = self.mdg.subdomains()[0]
@@ -913,7 +918,7 @@ class Mandel(pp.ContactMechanicsBiot):
         """Compute numerical traction.
 
         Returns:
-            Traction at the face centers in `N`. Shape is (sd.dim * sd.num_faces, ).
+            Traction at the face centers in `N` with ``shape=(sd.dim * sd.num_faces, )``.
 
         """
         sd = self.mdg.subdomains()[0]
@@ -1003,7 +1008,7 @@ class Mandel(pp.ContactMechanicsBiot):
             x: horizontal length in `m`.
 
         Returns:
-            Dimensionless horizontal length.
+            Dimensionless horizontal length with ``shape=(np, )``.
 
         """
         a, _ = self.params["domain_size"]  # [m]
@@ -1016,7 +1021,7 @@ class Mandel(pp.ContactMechanicsBiot):
             y: vertical length in `m`.
 
         Returns:
-            Dimensionless vertical length.
+            Dimensionless vertical length with ``shape=(np, )``.
 
         """
         _, b = self.params["domain_size"]  # [m]
@@ -1029,7 +1034,7 @@ class Mandel(pp.ContactMechanicsBiot):
             p: Pressure in `Pa`.
 
         Returns:
-            Nondimensional pressure.
+            Nondimensional pressure with ``shape=(np, )``.
 
         """
         a, _ = self.params["domain_size"]  # [m]
@@ -1043,7 +1048,8 @@ class Mandel(pp.ContactMechanicsBiot):
             qx: Horizontal component of the specific discharge in `m * s^{-1}`.
 
         Returns:
-            Nondimensional horizontal component of the specific discharge.
+            Nondimensional horizontal component of the specific discharge with
+            ``shape=(np, )``.
 
         """
         k = self.params["permeability"]  # [m^2]
