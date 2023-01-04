@@ -25,21 +25,24 @@ class ChangedGrid(pp.ContactMechanics):
         #g: pp.Grid = pp.CartGrid(n_cells, phys_dims)
         #g.compute_geometry()
         #self.mdg = pp.meshing.subdomains_to_mdg([[g]])
-        mesh_args = self.params.get("mesh_args", {"mesh_size_frac": .05})
+        # mesh_args = self.params.get("mesh_args", {"mesh_size_frac": .1})
+        mesh_args={"mesh_size_frac": .1}
         xendp = np.array([.2, .8])
         yendp= np.array([.2, 1])
-        self.mdg, self.box = pp.md_grids_2d.two_intersecting(mesh_args, xendp, yendp, simplex=True)
+        self.mdg, self.box = pp.md_grids_2d.two_intersecting(mesh_args, xendp,yendp, simplex=True)
+        # self.mdg, self.box = pp.md_grids_2d.seven_fractures_one_L_intersection(
+        # mesh_args)
         pp.contact_conditions.set_projections(self.mdg)
 
-#params={}
-#model_test=ChangedGrid(params)
-#pp.run_stationary_model(model_test, params)
-#pp.plot_grid(model_test.mdg)
+# params={}
+# model_test=ChangedGrid(params)
+# pp.run_stationary_model(model_test, params)
+# pp.plot_grid(model_test.mdg)
 #print(model_test.create_grid)
 #print(model_test)
 
 class ChangedPermeabilityAndSource(ChangedGrid):
-    """An IncompressibleFlow model with modified grid and
+    """A ContactMechanics model with modified grid and
     changed permeability."""
 
 
@@ -49,7 +52,7 @@ class ChangedPermeabilityAndSource(ChangedGrid):
         values = np.zeros((self.nd, sd.num_faces))
         # Reshape according to PorePy convention
         values = values.ravel("F")
-        #values[0:9]=1
+        values[0:9]=1
         return values
 
     def _body_force(self, sd: pp.Grid) -> np.ndarray:
@@ -93,10 +96,15 @@ class ChangedPermeabilityAndSource(ChangedGrid):
         """
         return np.ones(sd.num_cells)
 
-params={}
-model = ChangedPermeabilityAndSource(params)
-#print(model.)
-pp.run_stationary_model(model,params)
+
+# params={"max_iterations": 1,
+        #"nl_convergence_tol": 1e-10,
+        #"nl_divergence_tol": 1e5,
+        #}
+params = {}
+model = ChangedPermeabilityAndSource()
+pp.run_stationary_model(model, params)
+pp.plot_grid(model.mdg, None, model.displacement_variable)
 #inds = model.dof_manager.dof_var(var=[model.displacement_variable])
 #vals = model.dof_manager.assemble_variable(variables = [model.displacement_variable])
 #displacement = vals[inds]
