@@ -17,16 +17,7 @@ class ChangedGrid(pp.ContactMechanics):
             box (dict): The bounding box of the domain, defined through minimum and
                 maximum values in each dimension.
         """
-        # Use default mesh size if none are provided in the parameters passed to the class
-        # on initialization
-        #phys_dims = np.array([1, 1])
-        #n_cells = np.array([3, 3])
-        #self.box = pp.geometry.bounding_box.from_points(np.array([[0, 0], phys_dims]).T)
-        #g: pp.Grid = pp.CartGrid(n_cells, phys_dims)
-        #g.compute_geometry()
-        #self.mdg = pp.meshing.subdomains_to_mdg([[g]])
-        # mesh_args = self.params.get("mesh_args", {"mesh_size_frac": .1})
-        mesh_args={"mesh_size_frac": .1}
+        mesh_args = self.params.get("mesh_args", {"mesh_size_frac": .5})
         xendp = np.array([.2, .8])
         yendp= np.array([.2, 1])
         self.mdg, self.box = pp.md_grids_2d.two_intersecting(mesh_args, xendp,yendp, simplex=True)
@@ -34,16 +25,14 @@ class ChangedGrid(pp.ContactMechanics):
         # mesh_args)
         pp.contact_conditions.set_projections(self.mdg)
 
-# params={}
-# model_test=ChangedGrid(params)
-# pp.run_stationary_model(model_test, params)
-# pp.plot_grid(model_test.mdg)
-#print(model_test.create_grid)
-#print(model_test)
+params={}
+model_test=ChangedGrid(params)
+pp.run_stationary_model(model_test, params)
+pp.plot_grid(model_test.mdg, info="f", alpha=0.75)
 
 class ChangedPermeabilityAndSource(ChangedGrid):
     """A ContactMechanics model with modified grid and
-    changed permeability."""
+    changed things."""
 
 
     def _bc_values(self, sd: pp.Grid) -> np.ndarray:
@@ -52,7 +41,7 @@ class ChangedPermeabilityAndSource(ChangedGrid):
         values = np.zeros((self.nd, sd.num_faces))
         # Reshape according to PorePy convention
         values = values.ravel("F")
-        values[0:9]=1
+        #values[0:2]=1
         return values
 
     def _body_force(self, sd: pp.Grid) -> np.ndarray:
@@ -97,18 +86,15 @@ class ChangedPermeabilityAndSource(ChangedGrid):
         return np.ones(sd.num_cells)
 
 
-# params={"max_iterations": 1,
-        #"nl_convergence_tol": 1e-10,
-        #"nl_divergence_tol": 1e5,
-        #}
-params = {}
-model = ChangedPermeabilityAndSource()
+params={"max_iterations": 10,
+        "nl_convergence_tol": 1e-10,
+        "nl_divergence_tol": 1e5,
+        }
+#params = {}
+model = ChangedPermeabilityAndSource(params)
 pp.run_stationary_model(model, params)
-pp.plot_grid(model.mdg, None, model.displacement_variable)
+pp.plot_grid(model.mdg, vector_value=model.displacement_variable, info="c")
 #inds = model.dof_manager.dof_var(var=[model.displacement_variable])
-#vals = model.dof_manager.assemble_variable(variables = [model.displacement_variable])
-#displacement = vals[inds]
-#print(displacement)
-#print(model.convergence_status)
-#print(model.mortar_displacement_variable)
-#pp.plot_grid(model.mdg, displacement, figsize=[10, 7])
+#vals = model.dof_manager.assemble_variable(variables=[model.displacement_variable])
+#mortar_displacement = vals[inds]
+#print(mortar_displacement)
