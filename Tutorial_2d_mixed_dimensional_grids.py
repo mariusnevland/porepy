@@ -38,10 +38,55 @@ class ChangedGrid(pp.ContactMechanics):
 due to default parameters (notably Dirichlet conditions of value 0). A simple way to 
 make the solution a little bit more interesting is to add gravity:"""
 
+######################### BOUNDARY CONDITIONS
+
 """In order to add boundary conditions you should know how the cells/faces/nodes are 
 arranged. It seems like the cells and faces are multiple tuples/lists, first listing 
 the cells/faces of the higher-dimensional domain, and then of the lower-dimensional 
-domains (mortar + fracture?)"""
+domains (mortar + fracture?). 
+
+It seems like you need to find the indices of the faces where you want to assign 
+certain boundary data, and you must specify whether you are in the higher- or 
+lower-dimensional domain.
+
+Example for the incompressible flow model:"""
+
+
+def _bc_values(self, sd) -> np.ndarray:
+    """Homogeneous boundary values.
+    Units:
+        Dirichlet conditions: Pa = kg / m^1 / s^2
+        Neumann conditions: m^3 / s
+    """
+    bd = np.zeros(sd.num_faces)
+    #Assign non-zero pressure at the top boundary. Need to find the indices of
+    # the top faces and make sure we are in the highest-dimensional subdomain.
+    if sd.dim == self.mdg.dim_max():
+        bd[21] = 1
+        bd[19] = 1
+    print(bd)
+    return bd
+
+
+"""Note that for the contact mechanics model, the list of boundary data is 
+two-dimensional (but it gets "raveled" into 1D). This is because the boundary
+data are now vectors (displacement), and so you must specify each component of the 
+vectors. The first component is the x-axis, and the second is the y-axis."""
+
+"""Example:"""
+
+
+def _bc_values(self, sd: pp.Grid) -> np.ndarray:
+    """Set homogeneous conditions on all boundary faces."""
+    # Values for all Nd components, face-wise
+    values = np.zeros((self.nd, sd.num_faces))
+    # This puts displacement of .5 at the top boundary, in the y-direction.
+    values[1, 19] = .5
+    values[1, 21] = .5
+    # Reshape according to PorePy convention
+    values = values.ravel("F")
+    # values[0:2]=1
+    return values
 
 
 class ContactWithGravity(ChangedGrid):

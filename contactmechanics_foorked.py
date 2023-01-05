@@ -17,18 +17,21 @@ class ChangedGrid(pp.ContactMechanics):
             box (dict): The bounding box of the domain, defined through minimum and
                 maximum values in each dimension.
         """
-        mesh_args = self.params.get("mesh_args", {"mesh_size_frac": .5})
+        mesh_args = self.params.get("mesh_args", {"mesh_size_frac": 5})
+        endp = np.array([.2, .5])
         xendp = np.array([.2, .8])
         yendp= np.array([.2, 1])
-        self.mdg, self.box = pp.md_grids_2d.two_intersecting(mesh_args, xendp,yendp, simplex=True)
+        self.mdg, self.box = pp.md_grids_2d.single_vertical(mesh_args, endp,simplex=True)
+        # self.mdg, self.box = pp.md_grids_2d.two_intersecting(mesh_args, xendp,yendp,
+        # simplex=True)
         # self.mdg, self.box = pp.md_grids_2d.seven_fractures_one_L_intersection(
         # mesh_args)
         pp.contact_conditions.set_projections(self.mdg)
 
 params={}
 model_test=ChangedGrid(params)
-pp.run_stationary_model(model_test, params)
-pp.plot_grid(model_test.mdg, info="f", alpha=0.75)
+#pp.run_stationary_model(model_test, params)
+#pp.plot_grid(model_test.mdg, info="f", alpha=0.75)
 
 class ChangedPermeabilityAndSource(ChangedGrid):
     """A ContactMechanics model with modified grid and
@@ -39,34 +42,36 @@ class ChangedPermeabilityAndSource(ChangedGrid):
         """Set homogeneous conditions on all boundary faces."""
         # Values for all Nd components, face-wise
         values = np.zeros((self.nd, sd.num_faces))
+        # This puts displacement of .5 at the top boundary, in the y-direction.
+        values[1,19]=.5
+        values[1,21]=.5
         # Reshape according to PorePy convention
         values = values.ravel("F")
-        #values[0:2]=1
         return values
 
-    def _body_force(self, sd: pp.Grid) -> np.ndarray:
-        """Body force parameter.
-
-        If the source term represents gravity in the y (2d) or z (3d) direction,
-        use:
-            vals = np.zeros((self,nd, sd.num_cells))
-            vals[-1] = density * pp.GRAVITY_ACCELERATION * sd.cell_volumes
-            return vals.ravel("F")
-
-        Parameters
-        ----------
-        sd : pp.Grid
-            Subdomain, usually the matrix.
-
-        Returns
-        -------
-        np.ndarray
-            Integrated source values, shape self.nd * g.num_cells.
-
-        """
-        vals = np.zeros((self.nd, sd.num_cells))
-        vals[-1] = 1 * pp.GRAVITY_ACCELERATION * sd.cell_volumes
-        return vals.ravel("F")
+    # def _body_force(self, sd: pp.Grid) -> np.ndarray:
+    #     """Body force parameter.
+    #
+    #     If the source term represents gravity in the y (2d) or z (3d) direction,
+    #     use:
+    #         vals = np.zeros((self,nd, sd.num_cells))
+    #         vals[-1] = density * pp.GRAVITY_ACCELERATION * sd.cell_volumes
+    #         return vals.ravel("F")
+    #
+    #     Parameters
+    #     ----------
+    #     sd : pp.Grid
+    #         Subdomain, usually the matrix.
+    #
+    #     Returns
+    #     -------
+    #     np.ndarray
+    #         Integrated source values, shape self.nd * g.num_cells.
+    #
+    #     """
+    #     vals = np.zeros((self.nd, sd.num_cells))
+    #     vals[-1] = 1 * pp.GRAVITY_ACCELERATION * sd.cell_volumes
+    #     return vals.ravel("F")
 
     def _friction_coefficient(self, sd: pp.Grid) -> np.ndarray:
         """Friction coefficient parameter.
@@ -93,7 +98,7 @@ params={"max_iterations": 10,
 #params = {}
 model = ChangedPermeabilityAndSource(params)
 pp.run_stationary_model(model, params)
-pp.plot_grid(model.mdg, vector_value=model.displacement_variable, info="c")
+pp.plot_grid(model.mdg, vector_value=model.displacement_variable)
 #inds = model.dof_manager.dof_var(var=[model.displacement_variable])
 #vals = model.dof_manager.assemble_variable(variables=[model.displacement_variable])
 #mortar_displacement = vals[inds]
