@@ -81,12 +81,40 @@ def _bc_values(self, sd: pp.Grid) -> np.ndarray:
     # Values for all Nd components, face-wise
     values = np.zeros((self.nd, sd.num_faces))
     # This puts displacement of .5 at the top boundary, in the y-direction.
-    values[1, 19] = .5
-    values[1, 21] = .5
+    values[1, 19] = -0.1
+    values[1, 21] = -0.1
     # Reshape according to PorePy convention
     values = values.ravel("F")
     # values[0:2]=1
     return values
+
+
+"""The default boundary conditions for the contact mechanics class is Dirichlet (
+displacement). But you should be able to change it to Neumann (traction I believe) by
+redefining the bc_type method. Example:"""
+
+
+def _bc_type(self, sd: pp.Grid) -> pp.BoundaryConditionVectorial:
+    """Define type of boundary conditions: Neumann on all global boundaries,
+    Dirichlet on fracture faces.
+
+
+    Args:
+        sd: Subdomain grid.
+
+    Returns:
+        bc: Boundary condition representation.
+
+    """
+    all_bf = sd.get_boundary_faces()
+    bc = pp.BoundaryConditionVectorial(sd, all_bf, "neu")
+    # Default internal BC is Neumann. We change to Dirichlet for the contact
+    # problem. I.e., the mortar variable represents the displacement on the
+    # fracture faces.
+    frac_face = sd.tags["fracture_faces"]
+    bc.is_neu[:, frac_face] = False
+    bc.is_dir[:, frac_face] = True
+    return bc
 
 
 class ContactWithGravity(ChangedGrid):
