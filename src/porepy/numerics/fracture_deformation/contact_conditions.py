@@ -328,6 +328,7 @@ class ColoumbContact(AbstractInterfaceLaw):
                 # This is Eq (31) in Berge et al, including the regularization
                 # described in (32) and onwards. The expressions are somewhat complex,
                 # and are therefore moved to subfunctions.
+                print("Hello World, sliding.")
                 loc_displacement_tangential, r, v = self._sliding_coefficients(
                     contact_force_tangential[:, i],
                     displacement_jump_tangential[:, i],
@@ -360,6 +361,7 @@ class ColoumbContact(AbstractInterfaceLaw):
                 # Weight for contact force computed according to (30) in Berge.
                 # NOTE: There is a sign error in the paper, the coefficient for the
                 # normal contact force should have a minus in front of it
+                print("Hello World, sticking.")
                 loc_traction_tangential = (
                     -friction_coefficient[i]  # The minus sign is correct
                     * displacement_jump_tangential[:, i].ravel("F")
@@ -383,6 +385,7 @@ class ColoumbContact(AbstractInterfaceLaw):
 
             elif ~penetration_bc[i]:  # not in contact
                 # This is a free boundary, no conditions on displacement
+                print("Hello World, no contact.")
                 loc_displacement_weight = np.zeros((self.dim, self.dim))
 
                 # Free boundary conditions on the forces.
