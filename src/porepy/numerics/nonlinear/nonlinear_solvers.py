@@ -65,7 +65,7 @@ class NewtonSolver:
 
         if not is_converged:
             model.after_newton_failure(sol, errors, iteration_counter)
-        print(iteration_counter)
+        print("Number of Newton iterations:", iteration_counter)
 
         return error_norm, is_converged, iteration_counter
 
