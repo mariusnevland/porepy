@@ -604,8 +604,8 @@ class TimeManager:
             self.time_index -= 1  # (S2)
             self.dt *= self.recomp_factor  # (S3)
             self._recomp_num += 1  # (S4)
-            if self._is_about_to_hit_schedule:  # (S5)
-                self._scheduled_idx -= 1
+            # if self._is_about_to_hit_schedule:  # (S5)
+            #     self._scheduled_idx -= 1
 
             if self._print_info:
                 msg = (

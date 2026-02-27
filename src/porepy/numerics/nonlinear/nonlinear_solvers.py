@@ -87,7 +87,7 @@ class NewtonSolver:
             )
 
             model.before_nonlinear_iteration()
-            nonlinear_increment = self.iteration(model)
+            div, nonlinear_increment = self.iteration(model)
             model.after_nonlinear_iteration(nonlinear_increment)
 
             if (
@@ -102,9 +102,13 @@ class NewtonSolver:
             else:
                 residual = None
 
-            is_converged, is_diverged = model.check_convergence(
-                nonlinear_increment, residual, reference_residual, self.params
-            )
+            if div:
+                is_diverged = True
+                is_converged = False
+            else:
+                is_converged, is_diverged = model.check_convergence(
+                    nonlinear_increment, residual, reference_residual, self.params
+                )
 
         # Redirect all loggers to not interfere with the progressbar.
         with logging_redirect_tqdm([logging.root]):
@@ -176,5 +180,11 @@ class NewtonSolver:
 
         """
         model.assemble_linear_system()
-        nonlinear_increment = model.solve_linear_system()
-        return nonlinear_increment
+        div = False
+        try:
+            nonlinear_increment = model.solve_linear_system()
+        except Exception:
+            # If the linear system fails to solve, return a zero increment.
+            nonlinear_increment = np.ones(model.equation_system.num_dofs())
+            div = True
+        return div, nonlinear_increment
